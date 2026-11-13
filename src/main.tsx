@@ -1,3 +1,4 @@
+import { PasscodeGate } from './PasscodeGate';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Viewer } from './Viewer';
@@ -459,4 +460,4 @@ function App() {
 }
 
 if(import.meta.env.MODE==='netlify')document.documentElement.dataset.hosted='true';
-createRoot(document.getElementById('root')!).render(<App/>);
+createRoot(document.getElementById('root')!).render(import.meta.env.MODE==='netlify' ? <PasscodeGate><App/></PasscodeGate> : <App/>);

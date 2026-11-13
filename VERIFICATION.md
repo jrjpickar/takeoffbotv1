@@ -46,3 +46,4 @@ The supplied archive included a Desk CSV fixture and plan-text fixture. It did n
 - The pricing function returned $6,325 cost and $14,547 bid on the Desk reference fixture.
 - The hosted variant keeps the uploaded PDF and saved takeoff on-device. The pricing function receives the scope quantities and markup, with anonymous sheet numbers. The public bundle excludes the Desk rate tables. Hosted raster detection flags a backdrop for manual tracing.
 - The Netlify account session reached sign-in. No live deployment URL or Netlify-hosted execution was verified.
+- The passcode-gated hosted build passed both Chromium workflows. The function test verified missing configuration, wrong passcodes, missing or tampered cookies, pricing with a valid session, and invalidation after rotation. Run it with `node --test tests/netlify-auth.mjs`. Live Netlify deployment was not performed.

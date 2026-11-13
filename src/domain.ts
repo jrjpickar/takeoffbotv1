@@ -85,7 +85,7 @@ export function measure(item: Item, scale?: Calibration) {
 export const quantity = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 export const currency = (n: number) => n.toLocaleString('en-US', {style:'currency',currency:'USD'});
 export async function request(url: string, init?: RequestInit) {
-  const response = import.meta.env.MODE === 'netlify'
+  const response = import.meta.env.MODE === 'netlify' && url.startsWith('/api/')
     ? await (await import('./hosted')).hostedRequest(url, init)
     : await fetch(url, init);
   if (!response.ok) {

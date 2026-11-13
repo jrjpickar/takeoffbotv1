@@ -19,6 +19,10 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   page.on('pageerror',e=>exceptions.push(e.message));
   page.on('request',r=>{if(!r.url().startsWith('http://127.0.0.1:8765') && !r.url().startsWith('blob:'))external.push(r.url());});
   await page.goto('/');
+  if(await page.locator('html[data-hosted]').count()){
+    await page.getByLabel('Passcode').fill('local-browser-test-only');
+    await page.getByRole('button',{name:'Unlock'}).click();
+  }
   const chooser=page.waitForEvent('filechooser');
   await page.getByRole('button',{name:'Upload PDF'}).click();
   await (await chooser).setFiles('samples/interior-demo.pdf');
@@ -99,6 +103,10 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
 
 test('draw remaining tools and move a count on the original plan',async({page})=>{
   await page.goto('/');
+  if(await page.locator('html[data-hosted]').count()){
+    await page.getByLabel('Passcode').fill('local-browser-test-only');
+    await page.getByRole('button',{name:'Unlock'}).click();
+  }
   await page.getByRole('button',{name:'Open sample'}).click();
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true');
   await page.getByRole('checkbox',{name:'Snap',exact:true}).uncheck();

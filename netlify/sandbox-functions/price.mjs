@@ -1,7 +1,11 @@
 import adapter from '../../desk/adapter.cjs';
+import { authenticated, passcode, reply } from '../auth.mjs';
 
 export default async function handler(request) {
   if (request.method !== 'POST') return new Response(null,{status:405,headers:{Allow:'POST'}});
+  const secret=passcode();
+  if(!secret) return reply({detail:'Sandbox passcode is not configured.'},503);
+  if(!authenticated(request,secret)) return reply({detail:'Sandbox session expired. Reload and enter the passcode.'},401);
   try {
     const text=await request.text();
     if(text.length>250000) return Response.json({detail:'Pricing request is too large.'},{status:413});
