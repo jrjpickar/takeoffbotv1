@@ -155,10 +155,10 @@ function App() {
     setMode(m);setPending([]);setFeet('');setError('');
   }
   function changeScope(s: Scope) {
-    setScope(s);setPending([]);
-    if (mode!=='select' && mode!=='pan' && mode!=='calibrate' && !toolsFor(s).includes(mode)) {
-      setMode(toolsFor(s)[0]);
-    }
+    if(s===scope&&toolsFor(s).includes(mode as Tool))return;
+    setScope(s);setSelected(undefined);
+    setHidden(prev=>prev.filter(key=>key!==s));
+    changeMode(toolsFor(s).includes(mode as Tool)?mode:toolsFor(s)[0]);
   }
   function changeSheet(index: number) {
     setSheet(index);setPending([]);setSelected(undefined);setFeet('');
@@ -231,7 +231,7 @@ function App() {
     } catch(e) {report(e);}
     finally {setBusy('');}
   }
-  async function run(applyColors=false) {
+  async function run(applyColors=false, allSheets=false) {
     setColorPrompt(false);
     setBusy('Processing sheet…');setError('');setNotice('');setPending([]);setMode('select');
     setUndo(prev=>[...prev.slice(-49),state]);setRedo([]);
@@ -239,7 +239,8 @@ function App() {
     const ids=new Set(state.items.map(i=>i.id));
     const geometryKey=(i:Item)=>JSON.stringify([i.sheet,i.scope,i.points.map(p=>p.map(v=>Math.round(v*10000))).sort()]);
     const existingGeometry=new Set(state.items.map(geometryKey));
-    let added=0, skipped=0;
+    let added=0, skipped=0, matched=0;
+    const failed:number[]=[];
     let batch:Item[]=[];
     let frame:number|undefined;
     const flush=()=>{
@@ -252,22 +253,37 @@ function App() {
       setHidden(prev=>prev.filter(scope=>!visibleScopes.has(scope)));
     };
     try {
-      await stream(`${root}/sheets/${sheet}/run`,{calibration:cal,rules},(kind,data)=>{
-        if (kind==='scale') setState(prev=>changeScale(prev,sheet,data as Calibration));
-        if(kind==='measurement'||kind==='measurements'){
-          const candidates=kind==='measurements'?data as Item[]:[data as Item];
-          for(const candidate of candidates){
-            const key=geometryKey(candidate);
-            if(ids.has(candidate.id)||existingGeometry.has(key)){skipped++;continue;}
-            ids.add(candidate.id);existingGeometry.add(key);added++;
-            batch.push(candidate);
-          }
-          if(batch.length&&frame===undefined)frame=requestAnimationFrame(flush);
+      const targets=allSheets ? project!.sheets.map((_,index)=>index) : [sheet];
+      for(const index of targets){
+        if(allSheets)setBusy(`Scanning sheet ${index+1} of ${targets.length}…`);
+        let found=false;
+        try {
+          await stream(`${root}/sheets/${index}/run`,{calibration:state.scales[index],rules:state.rules?.[index]??[]},(kind,data)=>{
+            if (kind==='scale') setState(prev=>changeScale(prev,index,data as Calibration));
+            if(kind==='measurement'||kind==='measurements'){
+              const candidates=kind==='measurements'?data as Item[]:[data as Item];
+              found ||= candidates.length>0;
+              for(const candidate of candidates){
+                const key=geometryKey(candidate);
+                if(ids.has(candidate.id)||existingGeometry.has(key)){skipped++;continue;}
+                ids.add(candidate.id);existingGeometry.add(key);added++;
+                batch.push(candidate);
+              }
+              if(batch.length&&frame===undefined)frame=requestAnimationFrame(flush);
+            }
+            if (kind==='warnings') setState(prev=>({...prev,notes:{...prev.notes,[index]:data as string[]}}));
+          });
+        } catch(e) {
+          if(!allSheets)throw e;
+          failed.push(index+1);
+          setState(prev=>({...prev,notes:{...prev.notes,[index]:[e instanceof Error?e.message:'Extraction failed.']}}));
         }
-        if (kind==='warnings') setState(prev=>({...prev,notes:{...prev.notes,[sheet]:data as string[]}}));
-      });
+        if(found)matched++;
+      }
       flush();
-      setNotice(`${added} added for review${skipped ? `, ${skipped} already present` : ''}.`);
+      setNotice(allSheets
+        ? `Scanned ${targets.length} sheets: ${matched} matched, ${added} added for review, ${skipped} already present${failed.length?`; failed sheets ${failed.join(', ')}`:''}.`
+        : `${added} added for review${skipped ? `, ${skipped} already present` : ''}.`);
     } catch(e) {report(e);}
     finally {flush();setBusy('');}
   }
@@ -329,6 +345,7 @@ function App() {
         <label className="inline"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/> Snap</label>
         <div className="toolbar-end">
           <button onClick={()=>void run()}>Run sheet takeoff</button>
+          <button onClick={()=>void run(false,true)}>Run all sheets</button>
           <button aria-expanded={colorPrompt} onClick={()=>{setRunColors({...state.colors});setColorPrompt(!colorPrompt);}}>Run colors…</button>
           <button disabled={!localItems.length} onClick={()=>{
             if(!window.confirm(`Clear ${localItems.length} takeoffs from this sheet? You can undo this.`))return;
@@ -350,7 +367,7 @@ function App() {
           <h2>Sheets</h2>
           <nav className="sheet-list" aria-label="Sheets">
             {project.sheets.map((s,i)=><button key={i} className={i===sheet?'active':''} onClick={()=>changeSheet(i)}>
-              <span>{s.name}</span><small>{state.scales[i]?'Calibrated':'Uncalibrated'}</small>
+              <span>{s.name}</span><small>{state.scales[i]?'Calibrated':'Uncalibrated'}{state.notes[i]?' · Scanned':''}</small>
             </button>)}
           </nav>
           <h2>Scope layers</h2>
@@ -440,6 +457,7 @@ function App() {
               onChange={e=>commit({...state,colors:{...state.colors,[item.scope]:e.target.value}})}/></label>
             <label>Assigned scope <select value={item.scope} onChange={e=>{
               const target=e.target.value as Scope;
+              setScope(target);
               edit({...item,scope:target,status:'review',edited:true,thickness:target==='slab'?item.thickness:null});
               setHidden(hidden.filter(s=>s!==target));
             }}>{scopeKeys.filter(key=>toolsFor(key).includes(item.tool)).map(key=><option key={key} value={key}>{scopes[key][0]}</option>)}</select></label>

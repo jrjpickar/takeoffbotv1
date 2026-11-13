@@ -1,4 +1,5 @@
 import * as pdf from 'mupdf';
+import { hatchAreas } from './hatch-areas';
 import { demolitionLegend } from './legend-scope';
 import { wallPairs } from './raster-walls';
 import { distance, measure, scopes, type Calibration, type Item, type Point, type Rule, type Scope, type Sheet } from './domain';
@@ -125,7 +126,7 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
   });
   const calibration=input.calibration ?? (bars.length===1?bars[0]:undefined);
   if(calibration&&!input.calibration) send('scale',calibration);
-  if(!calibration) warnings.push('Calibrate this sheet with a verified dimension. Printed scale text alone is insufficient.');
+
   if(bars.length>1) warnings.push('Multiple tagged scale bars. Confirm scale manually.');
   function emit(scope:Scope, tool:Item['tool'], points:Point[], source:string, key:string, thickness:number|null) {
     const item:Item={id:`auto-${index}-${key}`,sheet:index,scope,tool,points,source,thickness,status:'review',edited:false};
@@ -197,6 +198,24 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
       emit(scope,'count',[[(l+r)/2,(t+b)/2]],source,`${path.paint==='fill'?'f':'v'}${Math.abs(path.seq)}`,thickness);
     } else warnings.push(`${source}: unsupported geometry for ${scope}.`);
   }
+  const hatchScopes = new Map<Scope,typeof labels[number]>();
+  for(const label of labels){
+    const name=label.text.replace(/^\(E\)\s*/i,'').trim();
+    const match=/^(CEILING|FLOOR(?:ING)?|(?:CONCRETE )?SLAB) (?:PARTIAL )?DEMOLITION AREA$/i.exec(name);
+    if(match){
+      const scope:Scope=/^ceiling/i.test(match[1])?'ceiling':/^floor/i.test(match[1])?'floor':'slab';
+      hatchScopes.set(scope,label);
+    }
+  }
+  for(const [scope,label] of hatchScopes){
+    if(input.rules.some(rule=>rule.scope===scope)||!labels.some(l=>/LEGENDS?$/i.test(l.text)))continue;
+    const result=hatchAreas(paths,label.bounds);
+    if(!result)continue;
+    for(const [i,points] of result.candidates.entries())
+      emit(scope,'polygon',points,`Estimated area from repeated vector hatch · ${label.text}`,`h-${scope}-${i}`,null);
+    if(result.candidates.length)warnings.push(`${scopes[scope][0]} hatch areas are approximate. Verify boundaries and any openings before approval.`);
+    if(result.unsupported)warnings.push(`${result.unsupported} hatched region(s) had openings or complex outlines. Trace those manually.`);
+  }
   const wallLegend=labels.find(label=>/^WALL(?:S)?\s+TO\s+BE\s+(?:DEMO(?:LISHED)?|REMOVED)\.?$/i.test(label.text));
   const floorPlan=labels.some(label=>/^DEMO(?:LITION)?\s+FLOOR\s+PLAN$/i.test(label.text));
   const redSwatch=wallLegend&&paths.filter(path=>path.color==='#ff0000'&&
@@ -232,7 +251,15 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     if(candidates?.length)warnings.push('Verify wall candidates against the drawing. Trace omitted diagonal, short, or interrupted walls manually. Doors and cubicles require separate review.');
     else warnings.push('The wall legend matched, but no reliable paired red outlines were found.');
   }else if(raster)warnings.push('Raster backdrop detected. Calibrate and trace raster geometry manually.');
-  if(!marks.size)warnings.push('No supported demolition geometry matched. Use manual tools or define a verified vector style rule.');
+  if(marks.size&&!calibration)warnings.push('Calibrate this sheet with a verified dimension before approving lengths or areas.');
+  if(!marks.size){
+    const sheetName=(await document(id,file)).loadPage(index);
+    try{
+      if(/mechanical demo/i.test(sheetName.getLabel()))
+        warnings.push('Mechanical demolition: verify duct runs, disconnect points and associated devices manually.');
+      else warnings.push('No supported demolition geometry matched. Use manual tools or define a verified vector style rule.');
+    }finally{sheetName.destroy();}
+  }
   const grouped=new Map<string,number>();
   for(const warning of warnings){
     const key=warning.replace(/^(?:Vector |Style rule |Tagged annotation |Annotation xref ).*?: /,'');

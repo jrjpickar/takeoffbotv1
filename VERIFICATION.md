@@ -59,3 +59,7 @@ The browser paints available measurement batches on animation frames without an 
 ## Consistent colors and expanded detection
 
 The hosted regression uses an ordinary vector demolition legend with filled and stroked swatches. It verifies two same-color door counts, 14 SF each of flooring and ceiling, and 10 LF of sawcutting. It verifies that an unbound fixture note creates no takeoff and reruns do not duplicate quantities. The Pine Street test covers the original 26 editable raster wall candidates. Raster doors, fixtures, and finish areas without bound geometry still need review and manual takeoff. No STACK comparison or before-and-after speed benchmark was performed.
+
+## Whole-plan Pine Street audit
+
+The supplied ZIP contains the same 44-sheet PDF as the earlier Pine Street attachment. The detector completed all 44 sheets. Two produced candidates: 26 wall segments on A-1.01 and six ceiling polygons on A-1.04. The ceiling polygons had no overlapping area in the geometry union check. Their boundaries are approximated from hatch spacing and endpoints, so the totals are preliminary. The check does not establish coverage of all demolition scope or field-verified accuracy. M01.01 mechanical demolition still requires manual verification of duct runs, disconnect points, and associated devices. Door swings, cubicles, and scope shown only in notes also need review. The private plan is excluded from the patch.

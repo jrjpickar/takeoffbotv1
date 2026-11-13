@@ -73,3 +73,9 @@ Run `npm run build:netlify` and `npm test -- --config=playwright.netlify.config.
 The hosted engine reads exact demolition labels beside a distinct vector swatch under a **Demolition Legend** heading. It supports wall and sawcut lines, closed flooring, ceiling and slab regions, rectangular door and fixture markers, and millwork lines. Tagged and explicit markup rules still work. The engine keeps conflicting styles, unsupported symbols and unbound plan notes out of automated quantities. Door and fixture detection requires a bound marker or annotation. The Pine Street raster layout still produces wall candidates only.
 
 Worker results cross to the UI in batches of up to 32. The raster scan compares each run against bands from the preceding scanline. Repeat runs reuse extracted geometry for cached sheets.
+
+### Whole-plan review
+
+**Run all sheets** scans every sheet and reports matched sheets, new candidates, duplicates, and any extraction failures. Open each matching sheet to review its measurements. Length and area quantities require a verified calibration for that sheet. Selecting a scope immediately activates its compatible drawing tool (Line, Polygon, or Count). The assigned-scope control supports reclassification between scopes that share the measurement's geometry type.
+
+The hatch detector proposes approximate ceiling, flooring, or slab area outlines when it can match the spacing, direction, and color of a repeated vector hatch to an explicit demolition-area legend. Verify the outlines, openings, and measurements before approval. Unsupported scope requires manual measurement or a verified markup rule. To rerun the private Pine Street regression, set `A2Z_PINE_ZIP` to the path of the supplied ZIP and run the hosted browser tests.
