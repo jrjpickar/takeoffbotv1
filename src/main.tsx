@@ -42,6 +42,8 @@ function sheetMatches(name:string, filter:Scope|'demo'|'all') {
   };
   return cues[filter]?.test(name)??false;
 }
+const isDemoSheet=(view:Project['sheets'][number])=>sheetMatches(displaySheetName(view.name),'demo')||
+  (view.keywords??[]).includes('Demolition');
 const emptyState: State = {revision:0,items:[],scales:{},notes:{},rules:{},markup:null};
 
 async function stream(url: string, body: unknown, handle: (kind: string, data: unknown) => void) {
@@ -87,6 +89,9 @@ function App() {
   const [mode,setMode]=useState<Mode>('select');
   const [zoom,setZoom]=useState(1);
   const [snap,setSnap]=useState(true);
+  const [showReview,setShowReview]=useState(true);
+  const [navigatorTab,setNavigatorTab]=useState<'plans'|'takeoffs'>('plans');
+  const [fitPage,setFitPage]=useState(false);
   const [hidden,setHidden]=useState<Scope[]>([]);
   const [pending,setPending]=useState<Point[]>([]);
   const [feet,setFeet]=useState('');
@@ -116,8 +121,8 @@ function App() {
   const item=localItems.find(i=>i.id===selected);
   const vectors=useMemo(()=>extraction?.paths.flatMap(p=>p.items.flatMap(([kind,pts]) =>
     kind==='c' ? [pts[0],pts.at(-1)!] : pts)).slice(0,30000) ?? [],[extraction]);
-  const styles=Array.from(new Map(extraction?.paths.filter(p=>p.color)
-    .map(p=>[`${p.color}/${p.dashed}`,p] as const)).values());
+  const styles=useMemo(()=>Array.from(new Map(extraction?.paths.filter(p=>p.color)
+    .map(p=>[`${p.color}/${p.dashed}`,p] as const)).values()),[extraction]);
 
   const report=(e:unknown)=>setError(e instanceof Error ? e.message : String(e));
   useEffect(()=>{
@@ -191,7 +196,7 @@ function App() {
     changeMode(toolsFor(s).includes(mode as Tool)?mode:toolsFor(s)[0]);
   }
   function changeSheet(index: number) {
-    setSheet(index);setPending([]);setSelected(undefined);setFeet('');
+    setSheet(index);setZoom(1);setPending([]);setSelected(undefined);setFeet('');
   }
   async function open(endpoint: string, init?: RequestInit) {
     if (dirty && !window.confirm('Discard unsaved takeoff changes?')) return;
@@ -249,7 +254,18 @@ function App() {
     const key=(e:KeyboardEvent)=>{
       if (busy || (e.target instanceof HTMLElement && /INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))) return;
       if (e.key==='Escape') {setPending([]);setSelected(undefined);}
-      if (e.key==='Enter' && (mode==='polygon'||mode==='polyline')) finish(mode,pending);
+      if(project&&!e.metaKey&&!e.ctrlKey&&!e.altKey){
+        const tool=({v:'select',h:'pan',s:'calibrate'} as Partial<Record<string,Mode>>)[e.key.toLowerCase()];
+        if(tool)changeMode(tool);
+        if(e.key==='PageUp'||e.key==='PageDown'){
+          e.preventDefault();
+          changeSheet(Math.max(0,Math.min(project.sheets.length-1,sheet+(e.key==='PageUp'?-1:1))));
+        }
+        if(e.key==='0'){setFitPage(true);setZoom(1);}
+        if(e.key==='+'||e.key==='=')setZoom(v=>Math.min(12,v*1.25));
+        if(e.key==='-')setZoom(v=>Math.max(.35,v/1.25));
+      }
+      if (e.key==='Enter' && pending.length && (mode==='polygon'||mode==='polyline')) finish(mode,pending);
       if (e.key==='Delete' && item) remove(item.id);
       if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z') {e.preventDefault();if(e.shiftKey)redoAction();else undoAction();}
     };
@@ -268,7 +284,7 @@ function App() {
     } catch(e) {report(e);}
     finally {setBusy('');}
   }
-  async function run(applyColors=false, allSheets=false) {
+  async function run(applyColors=false, allSheets=false, demoOnly=false) {
     setColorPrompt(false);
     setBusy('Processing sheet…');setError('');setNotice('');setPending([]);setMode('select');
     setUndo(prev=>[...prev.slice(-49),state]);setRedo([]);
@@ -290,7 +306,7 @@ function App() {
       setHidden(prev=>prev.filter(scope=>!visibleScopes.has(scope)));
     };
     try {
-      const targets=allSheets ? project!.sheets.map((_,index)=>index) : [sheet];
+      const targets=allSheets ? project!.sheets.flatMap((view,index)=>!demoOnly||isDemoSheet(view)?[index]:[]) : [sheet];
       for(const index of targets){
         if(allSheets)setBusy(`Scanning sheet ${index+1} of ${targets.length}…`);
         let found=false;
@@ -377,6 +393,7 @@ function App() {
     const searchable=normalizeSheetSearch([displaySheetName(view.name),view.name,view.planName,...(view.keywords??[]),...scopeNames].join(' '));
     if(!searchTokens.every(token=>searchable.includes(token)))return false;
     return sheetMatches(displaySheetName(view.name),sheetFilter)||
+      (sheetFilter==='demo'&&isDemoSheet(view))||
       (sheetFilter==='demo'?relatedScopes.size>0:sheetFilter!=='all'&&relatedScopes.has(sheetFilter));
   })??[];
   return <div className="app" onDragEnter={e=>{
@@ -416,14 +433,9 @@ function App() {
     </header>
     {project ? <>
       <fieldset className="toolbar" disabled={!!busy}>
-        {(['select','pan','calibrate',...toolsFor(scope)] as Mode[]).map(m=><button key={m}
-          className={mode===m?'active':''} aria-pressed={mode===m} onClick={()=>changeMode(m)}>{names[m]}</button>)}
-        <span className="divider"/>
-        <button onClick={undoAction} disabled={!undo.length}>Undo</button>
-        <button onClick={redoAction} disabled={!redo.length}>Redo</button>
-        <label className="inline"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/> Snap</label>
         <div className="toolbar-end">
           <button onClick={()=>void run()}>Run sheet takeoff</button>
+          <button onClick={()=>void run(false,true,true)} disabled={!project.sheets.some(isDemoSheet)}>Run demo sheets</button>
           <button onClick={()=>void run(false,true)}>Run all sheets</button>
           <button aria-expanded={colorPrompt} onClick={()=>{setRunColors({...state.colors});setColorPrompt(!colorPrompt);}}>Run colors…</button>
           <button disabled={!localItems.length} onClick={()=>{
@@ -442,8 +454,13 @@ function App() {
         <button onClick={()=>void run(true)}>Apply colors and run</button>
         <button onClick={()=>setColorPrompt(false)}>Cancel</button>
       </div>}
-      <main className="workspace">
+      <main className={`workspace ${showReview?'':'review-hidden'}`}>
         <fieldset className="panel sidebar" disabled={!!busy}>
+          <div className="sidebar-tabs" aria-label="Navigator">
+            <button aria-pressed={navigatorTab==='plans'} onClick={()=>setNavigatorTab('plans')}>Plans</button>
+            <button aria-pressed={navigatorTab==='takeoffs'} onClick={()=>setNavigatorTab('takeoffs')}>Takeoffs</button>
+          </div>
+          <div hidden={navigatorTab!=='plans'}>
           <h2>Sheets</h2>
           <label className="sheet-filter">Search sheets
             <input type="search" value={sheetSearch} placeholder="Sheet number, title, keyword"
@@ -459,11 +476,13 @@ function App() {
             </select>
           </label>
           <nav className="sheet-list" aria-label="Sheets">
-            {filteredSheets.map(({view:s,index:i})=><button key={i} className={`${i===sheet?'active':''} ${sheetMatches(displaySheetName(s.name),'demo')?'demo-sheet':''}`} onClick={()=>changeSheet(i)}>
-              <span>{displaySheetName(s.name)}</span><small>{state.scales[i]?'Calibrated':'Uncalibrated'}{state.notes[i]?' · Scanned':''}{sheetMatches(displaySheetName(s.name),'demo')?' · Demo':''}</small>
+            {filteredSheets.map(({view:s,index:i})=><button key={i} className={`${i===sheet?'active':''} ${isDemoSheet(s)?'demo-sheet':''}`} onClick={()=>changeSheet(i)}>
+              <span>{displaySheetName(s.name)}</span><small>{state.scales[i]?'Calibrated':'Uncalibrated'}{state.notes[i]?' · Scanned':''}{isDemoSheet(s)?' · Demo':''}</small>
             </button>)}
             {!filteredSheets.length&&<p>No matching sheets.</p>}
           </nav>
+          </div>
+          <div hidden={navigatorTab!=='takeoffs'}>
           <h2>Scope layers</h2>
           {scopeKeys.map(key=><div className={`layer-row ${scope===key?'chosen':''}`} key={key}>
             <input type="checkbox" aria-label={`Show ${scopes[key][0]}`} checked={!hidden.includes(key)}
@@ -494,16 +513,34 @@ function App() {
             {rules.map((r,i)=><div className="rule-row" key={i}><span>{r.color} {r.dashed?'dash':'solid'} · {scopes[r.scope][0]}</span>
               <button aria-label={`Remove rule ${i+1}`} onClick={()=>setRules(rules.filter((_,j)=>i!==j))}>×</button></div>)}
           </details>
+          </div>
         </fieldset>
         <section className="drawing-panel">
           <div className="sheet-bar">
             <div><strong>{displaySheetName(project.sheets[sheet].name)}</strong><small>{instruction} · Scroll to zoom · Space + drag to pan</small></div>
-            <div className="inline">
+            <div className="inline canvas-nav">
+              <button aria-label="Previous sheet" title="Previous sheet (Page Up)" disabled={!!busy||sheet===0} onClick={()=>changeSheet(sheet-1)}>‹</button>
+              <span aria-label="Sheet position">{sheet+1}/{project.sheets.length}</span>
+              <button aria-label="Next sheet" title="Next sheet (Page Down)" disabled={!!busy||sheet===project.sheets.length-1} onClick={()=>changeSheet(sheet+1)}>›</button>
               <button aria-label="Zoom out" onClick={()=>setZoom(v=>Math.max(.35,v/1.25))}>−</button>
-              <button onClick={()=>setZoom(1)} title="Fit width">{Math.round(zoom*100)}%</button>
+              <span>{Math.round(zoom*100)}%</span>
               <button aria-label="Zoom in" onClick={()=>setZoom(v=>Math.min(12,v*1.25))}>+</button>
+              <button onClick={()=>{setFitPage(true);setZoom(1);}}>Fit page</button>
+              <button onClick={()=>{setFitPage(false);setZoom(1);}}>Fit width</button>
+              <button aria-pressed={showReview} onClick={()=>setShowReview(!showReview)}>Review</button>
             </div>
           </div>
+          <fieldset aria-label="Takeoff tools" className="canvas-tools" disabled={!!busy}>
+            <select aria-label="Takeoff scope" value={scope} onChange={e=>changeScope(e.target.value as Scope)}>
+              {scopeKeys.map(key=><option key={key} value={key}>{scopes[key][0]} · {scopes[key][1]}</option>)}
+            </select>
+        {(['select','pan','calibrate',...toolsFor(scope)] as Mode[]).map(m=><button key={m}
+          aria-label={names[m]} className={mode===m?'active':''} title={m==='select'?'Select (V)':m==='pan'?'Pan (H)':m==='calibrate'?'Calibrate (S)':names[m]} aria-pressed={mode===m} onClick={()=>changeMode(m)}>{m==='polygon'?'Area':names[m]}</button>)}
+        <span className="divider"/>
+        <button onClick={undoAction} disabled={!undo.length}>Undo</button>
+        <button onClick={redoAction} disabled={!redo.length}>Redo</button>
+        <label className="inline"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/> Snap</label>
+          </fieldset>
           {mode==='calibrate' && pending.length===2 && <form className="calibrate-bar" onSubmit={e=>{e.preventDefault();calibrate();}}>
             <label>Known distance (ft) <input autoFocus type="number" step="any" min="0" value={feet}
               onChange={e=>setFeet(e.target.value)} required /></label>
@@ -514,13 +551,13 @@ function App() {
           </div>}
           <Viewer colors={state.colors} key={project.id} url={root+'/pdf'} index={sheet} sheet={project.sheets[sheet]} items={visible}
             calibration={cal} mode={busy ? 'select' : mode} activeScope={scope} selected={busy ? undefined : selected} snap={snap}
-            zoom={zoom} setZoom={setZoom} vertices={vectors} pending={pending} setPending={setPending} addPoint={addPoint}
-            select={id=>{if(!busy)setSelected(id);}} changePoints={(id,points)=>{
+            zoom={zoom} setZoom={setZoom} fitPage={fitPage} vertices={vectors} pending={pending} setPending={setPending} addPoint={addPoint}
+            select={id=>{if(!busy){setSelected(id);if(id)setShowReview(true);}}} changePoints={(id,points)=>{
               const target=state.items.find(i=>i.id===id);
               if (target && !busy) edit({...target,points,status:'review',edited:true});
             }}/>
         </section>
-        <fieldset className="panel inspector" disabled={!!busy}>
+        <fieldset className="panel inspector" hidden={!showReview} disabled={!!busy}>
           <h2>Takeoff review</h2>
           <div className="review-counts"><span>{approved} approved</span><span>{review} in review</span></div>
           <div className="scale-status">{cal ? cal.source.startsWith('Printed scale:')?cal.source:`${quantity(cal.feet)} ft calibration · ${cal.source}` : 'Sheet scale required for lengths and areas'}</div>

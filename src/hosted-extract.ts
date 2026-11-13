@@ -1,3 +1,4 @@
+import { cadDemoTitle, cadLayer, cadWallRuns } from './cad-demolition';
 import { dashedPartitions } from './dashed-partitions';
 import { decodeSheetLabel, sheetIdentity } from './sheet-labels';
 import { printedScale } from './sheet-scale';
@@ -7,7 +8,7 @@ import { demolitionLegend } from './legend-scope';
 import { wallPairs } from './raster-walls';
 import { distance, measure, scopes, type Calibration, type Item, type Point, type Rule, type Scope, type Sheet } from './domain';
 
-type Stroke = {width:number;paint:'stroke'|'fill';color:string; dashed:boolean; seq:number; items:[string,Point[]][]; points:Point[];
+type Stroke = {layer?:string;width:number;paint:'stroke'|'fill';color:string; dashed:boolean; seq:number; items:[string,Point[]][]; points:Point[];
   closed:boolean; simple:boolean; bounds:pdf.Rect};
 const tag=/^A2Z TAKEOFF:\s*(\w+)(?:\s+THICKNESS=(\d+(?:\.\d+)?)IN)?$/i;
 const legend=/^A2Z LEGEND:\s*(\w+)(?:\s+THICKNESS=(\d+(?:\.\d+)?)IN)?$/i;
@@ -56,9 +57,26 @@ async function document(id:string, file:Blob) {
   current={id,doc,stream};
   return doc;
 }
+function demoTitle(page:pdf.Page){
+  if(!(page instanceof pdf.PDFPage))return;
+  const object=page.getObject();
+  const resources=object.getInheritable('Resources');
+  const properties=resources.get('Properties');
+  const layers:string[]=[];
+  try{
+    if(properties.isDictionary())properties.forEach(entry=>{
+      const name=entry.get('Name');
+      try{if(name.isString())layers.push(name.asString());}finally{name.destroy();entry.destroy();}
+    });
+    return cadDemoTitle(layers);
+  }finally{properties.destroy();resources.destroy();object.destroy();}
+}
 function sheetInfo(page:pdf.Page,index:number):Sheet {
   const [x0,y0,x1,y1]=page.getBounds('CropBox');
-  const label=decodeSheetLabel(page.getLabel());
+  const rawLabel=decodeSheetLabel(page.getLabel()).replace(/^\[\d+\]\s+(?=[A-Z])/i,'');
+  const label=/^[A-Z]+\d+[\w.-]*_.*-([A-Z]{1,5}\d+\.\d+[A-Z]?)$/i.exec(rawLabel)?.[1]??rawLabel;
+  const demo=demoTitle(page);
+  if(demo)return {name:`${label} ${demo}`,planName:`${label} ${demo}`,keywords:['Demolition',demo],width:x1-x0,height:y1-y0};
   let identity=sheetIdentity(label,[]);
   if(!identity.title){
     const text=page.toStructuredText('');
@@ -98,6 +116,8 @@ async function extractSheet(id:string,file:Blob,index:number) {
   const paths:Stroke[]=[];
   const labels:{text:string;bounds:pdf.Rect}[]=[];
   let rasterCoverage=0, strokeId=0, fillId=0;
+  const layers:string[]=[];
+  const demo=demoTitle(page);
   function readPath(path:pdf.Path,m:pdf.Matrix,cs:pdf.ColorSpace,color:number[],alpha:number,
     paint:Stroke['paint'],dashed:boolean,width=0){
       if(alpha<=0) return;
@@ -117,10 +137,12 @@ async function extractSheet(id:string,file:Blob,index:number) {
       if(!points.length) return;
       const bounds=points.reduce<pdf.Rect>((r,[x,y])=>[Math.min(x,r[0]),Math.min(y,r[1]),Math.max(x,r[2]),Math.max(y,r[3])],
         [Infinity,Infinity,-Infinity,-Infinity]);
-      paths.push({seq:paint==='stroke'?strokeId++:--fillId,paint,width:Math.round(width*100)/100,color:colorRGB?rgb(colorRGB):'',dashed,
+      paths.push({layer:layers.at(-1),seq:paint==='stroke'?strokeId++:--fillId,paint,width:Math.round(width*100)/100,color:colorRGB?rgb(colorRGB):'',dashed,
         bounds,items,points,closed,simple:moves===1&&!curved});
   }
   const device=new pdf.Device({
+    beginLayer(name){layers.push(cadLayer(name));},
+    endLayer(){layers.pop();},
     strokePath(path,stroke,m,cs,color,alpha){readPath(path,m,cs,color,alpha,'stroke',!!stroke.getDashes()?.length,stroke.getLineWidth()*Math.hypot(m[0],m[1]));},
     fillPath(path,_,m,cs,color,alpha){readPath(path,m,cs,color,alpha,'fill',false);},
   });
@@ -146,7 +168,7 @@ async function extractSheet(id:string,file:Blob,index:number) {
         type==='Circle'?[[(l+r)/2,(t+b)/2] as Point]:[]).map(([x,y])=>point(x,y,pdf.Matrix.identity));
       return {type,xref,text:a.getContents().trim(),points};
     }):[];
-    return {paths,labels,annotations,raster:rasterCoverage>=(x1-x0)*(y1-y0)*.5,width:x1-x0,height:y1-y0};
+    return {paths,labels,annotations,demo,raster:rasterCoverage>=(x1-x0)*(y1-y0)*.5,width:x1-x0,height:y1-y0};
   }finally{device.destroy();page.destroy();}
 }
 function detectedScale({annotations,labels,width,height}:Pick<Awaited<ReturnType<typeof extractSheet>>,
@@ -170,12 +192,26 @@ export async function vectors(id:string,file:Blob,index:number) {
   const data=await extract(id,file,index);
   const scale=detectedScale(data).scale;
   const scopeHints=detectedScopes(data.labels);
-  return {scale,scopeHints,paths:data.paths.filter(p=>p.paint==='stroke').map(({color,dashed,items})=>({color:color||null,dashed,items}))};
+  // Snap uses a bounded set of endpoints. Only send a sample for each style
+  // once the endpoint budget is filled.
+  const paths:{color:string|null;dashed:boolean;items:Stroke['items']}[]=[];
+  const styles=new Set<string>();
+  let remaining=15000;
+  for(const path of data.paths){
+    if(path.paint!=='stroke')continue;
+    const key=path.color+'/'+path.dashed;
+    if(remaining<=0&&styles.has(key))continue;
+    const items=path.items.slice(0,Math.max(0,remaining));
+    remaining-=items.length;
+    paths.push({color:path.color||null,dashed:path.dashed,items});
+    styles.add(key);
+  }
+  return {scale,scopeHints,paths};
 }
 
 export async function run(id:string,file:Blob,index:number,input:{calibration?:Calibration;rules:Rule[]},
   send:(kind:string,data:unknown)=>void) {
-  const {paths,labels,annotations,raster,width,height}=await extract(id,file,index);
+  const {paths,labels,annotations,demo,raster,width,height}=await extract(id,file,index);
   const warnings:string[]=[], marks=new Set<string>();
   send('scopeHints',detectedScopes(labels));
   const detected=detectedScale({annotations,labels,width,height});
@@ -253,6 +289,12 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
       emit(scope,'count',[[(l+r)/2,(t+b)/2]],source,`${path.paint==='fill'?'f':'v'}${Math.abs(path.seq)}`,thickness);
     } else warnings.push(`${source}: unsupported geometry for ${scope}.`);
   }
+  if(demo==='Demolition Floor Plan'&&!input.rules.some(rule=>rule.scope==='wall')){
+    for(const [i,points] of cadWallRuns(paths).entries())emit('wall','line',points,
+      'Paired wall edges on CAD A-DEMO layer · check limits against keyed notes',`cad-wall-${i}`,null);
+    warnings.push('CAD floor demo layers also contain fixtures, doors, finishes and relocation marks. Follow the keyed notes to measure these separately.');
+  }
+  if(demo==='Demolition Ceiling Plan')warnings.push('CAD ceiling demo layer mixes removal boundaries with fixtures and relocation marks. Trace ceiling areas from the keyed notes.');
   const dashedLegend=labels.find(l=>/^EXISTING CONSTRUCTION TO BE REMOVED$/i.test(l.text));
   if(dashedLegend&&labels.some(l=>/^DEMO(?:LITION)? LEGEND$/i.test(l.text))&&
     !input.rules.some(rule=>rule.scope==='wall')){

@@ -186,7 +186,7 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
     const number=url.searchParams.get('revision');
     const state=number===null?revisions.at(-1):revisions[Number(number)];
     if(!state)throw new Error('Revision not found.');
-    const views=sheets.some(view=>!view.keywords)
+    const views=sheets.some(view=>!view.keywords||/^Sheet \d+ \(H\d+_/.test(view.name))
       ? await extract<Sheet[]>({action:'sheets',id,file:await storedFile(project)})
       : sheets;
     return json({id,name,sheets:views,state,sessionOnly:sessionPlans.has(id)});

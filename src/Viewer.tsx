@@ -1,5 +1,5 @@
 import { BlobRange } from './blob-range';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Layer, Group, Line, Rect, Circle, Text } from 'react-konva';
 import type Konva from 'konva';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
@@ -9,7 +9,7 @@ import { type Calibration, type Item, type Mode, type Point, type Sheet, type Sc
 GlobalWorkerOptions.workerSrc = worker;
 interface Props {
   colors?: ScopeColors; url: string; index: number; sheet: Sheet; items: Item[]; calibration?: Calibration;
-  mode: Mode; activeScope: Scope; selected?: string; snap: boolean; zoom: number; setZoom:(zoom:number)=>void;
+  mode: Mode; activeScope: Scope; selected?: string; snap: boolean; zoom: number; fitPage:boolean; setZoom:(zoom:number)=>void;
   vertices: Point[]; pending: Point[]; setPending: (p: Point[]) => void;
   addPoint: (p: Point) => void; select: (id?: string) => void;
   changePoints: (id: string, points: Point[]) => void;
@@ -17,15 +17,18 @@ interface Props {
 const clamp = (n: number, max: number) => Math.max(0, Math.min(n, max));
 
 export function Viewer({ colors, url, index, sheet, items, calibration, mode, activeScope, selected, snap,
-  zoom, setZoom, vertices, pending, setPending, addPoint, select, changePoints }: Props) {
+  zoom, fitPage, setZoom, vertices, pending, setPending, addPoint, select, changePoints }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const drag = useRef<{x:number; y:number; left:number; top:number} | null>(null);
-  const [viewport, setViewport] = useState(800);
+  const [viewport, setViewport] = useState({width:800,height:650});
+  const [offset,setOffset]=useState({x:0,y:0});
   const [hover, setHover] = useState<Point>();
   const [error, setError] = useState('');
+  const [retry,setRetry]=useState(0);
   const [ready, setReady] = useState(false);
-  const fit = Math.min(1.65, Math.max(160, viewport-40)/sheet.width);
+  const fit = Math.min(1.65, Math.max(160, viewport.width-40)/sheet.width,
+    fitPage?Math.max(160,viewport.height-40)/sheet.height:Infinity);
   const z = fit*zoom;
   const width = sheet.width*z, height = sheet.height*z;
   const paper=useRef<HTMLDivElement>(null);
@@ -66,7 +69,7 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
     el.scrollTop+=sheetRect.top-viewport.top+pin.y*z-pin.offsetY;
   },[z]);
   useEffect(() => {
-    const observer = new ResizeObserver(([entry]) => setViewport(entry.contentRect.width));
+    const observer = new ResizeObserver(([entry]) => setViewport({width:entry.contentRect.width,height:entry.contentRect.height}));
     if (scroll.current) observer.observe(scroll.current);
     return () => observer.disconnect();
   }, []);
@@ -80,12 +83,24 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
     if(x<bounds.left+16||x>bounds.right-16)el.scrollLeft+=x-(bounds.left+bounds.right)/2;
     if(y<bounds.top+16||y>bounds.bottom-16)el.scrollTop+=y-(bounds.top+bounds.bottom)/2;
   },[selected,index]);
-  useLayoutEffect(()=>{setReady(false);},[url,index]);
-  const [largeFile,setLargeFile]=useState<Blob>();
+  useLayoutEffect(()=>{
+    setReady(false);
+    scroll.current?.scrollTo(0,0);
+    setOffset({x:0,y:0});
+  },[url,index]);
+  const updateOverlay=()=>{
+    const el=scroll.current, node=paper.current;
+    if(!el||!node)return;
+    const x=Math.max(0,el.scrollLeft-node.offsetLeft),y=Math.max(0,el.scrollTop-node.offsetTop);
+    setOffset(prev=>prev.x===x&&prev.y===y?prev:{x,y});
+  };
+  useLayoutEffect(updateOverlay,[width,height]);
+  const [localFile,setLocalFile]=useState<Blob>();
+  const [useFallback,setUseFallback]=useState(false);
   const [doc, setDoc] = useState<Awaited<ReturnType<typeof getDocument>['promise']>>();
   useEffect(() => {
     let live = true;
-    setDoc(undefined);setLargeFile(undefined);
+    setDoc(undefined);setLocalFile(undefined);setUseFallback(false);
     setError('');
     const options={standardFontDataUrl:'/pdf-assets/standard_fonts/',cMapUrl:'/pdf-assets/cmaps/',
       cMapPacked:true,wasmUrl:'/pdf-assets/wasm/'};
@@ -94,25 +109,32 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
       if(import.meta.env.MODE==='netlify'){
         const file=await (await import('./hosted')).hostedPlanBlob(url);
         if(!live)return;
-        if(file.size>128*1024*1024){setLargeFile(file);return;}
+        setLocalFile(file);
+        if(file.size>128*1024*1024){setUseFallback(true);return;}
         const range=new BlobRange(file,error=>{if(live)setError(String(error));});
         task=getDocument({...options,range,rangeChunkSize:256*1024,disableStream:true,disableAutoFetch:true});
       }else task=getDocument({...options,url});
       const loaded=await task.promise;
       if(live)setDoc(loaded);
-    })().catch(e=>{if(live)setError(e.message);});
+    })().catch(e=>{
+      if(!live)return;
+      if(import.meta.env.MODE==='netlify'&&task)setUseFallback(true);
+      else setError(e.message);
+    });
     return ()=>{live=false;void task?.destroy();};
-  }, [url]);
+  }, [url,retry]);
+  // Reuse the current bitmap between resolution steps while dragging or zooming.
+  const sheetPixels=Math.min(4096,2**Math.ceil(Math.log2(Math.max(512,Math.max(width,height)*(window.devicePixelRatio||1)))));
   useEffect(() => {
-    if ((!doc&&!largeFile) || !canvas.current) return;
+    if (!(useFallback?localFile:doc) || !canvas.current) return;
     let live = true;
     let cancel = () => {};
     const element = canvas.current;
     setError('');
     const render=async()=>{
-      const scale=Math.min(z*(window.devicePixelRatio||1),4096/Math.max(sheet.width,sheet.height));
-      if(largeFile){
-        const blob=await (await import('./hosted')).renderLargePlan(url,largeFile,index,scale);
+      const scale=sheetPixels/Math.max(sheet.width,sheet.height);
+      if(useFallback&&localFile){
+        const blob=await (await import('./hosted')).renderLargePlan(url,localFile,index,scale);
         if(!live)return;
         const image=await createImageBitmap(blob);
         try{
@@ -136,17 +158,35 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
       setReady(true);
     };
     const timer=window.setTimeout(()=>{
-      render().catch(e=>{if(live)setError(e.message);});
+      render().catch(e=>{
+        if(!live)return;
+        if(localFile&&!useFallback)setUseFallback(true);
+        else setError(e.message);
+      });
     },55);
     return () => { live=false;clearTimeout(timer);cancel(); };
-  }, [doc, largeFile, url, index, z, sheet.width, sheet.height]);
+  }, [doc, localFile, useFallback, url, index, sheetPixels, sheet.width, sheet.height]);
 
   const bounded = (p: Point): Point => [clamp(p[0],sheet.width),clamp(p[1],sheet.height)];
+  const vertexGrid=useMemo(()=>{
+    const grid=new Map<string,Point[]>();
+    for(const point of vertices){
+      const key=point.map(n=>Math.floor(n/32)).join('/');
+      const points=grid.get(key)??[];
+      points.push(point);grid.set(key,points);
+    }
+    return grid;
+  },[vertices]);
   function snapped(p: Point, ignore?: string) {
     if (!snap) return bounded(p);
     let best = 9/z;
     let result = p;
-    const targets = [...vertices, ...items.filter(i => i.id !== ignore).flatMap(i => i.points)];
+    const targets = items.filter(i => i.id !== ignore).flatMap(i => i.points);
+    for(let x=Math.floor((p[0]-best)/32);x<=Math.floor((p[0]+best)/32);x++){
+      for(let y=Math.floor((p[1]-best)/32);y<=Math.floor((p[1]+best)/32);y++){
+        for(const point of vertexGrid.get(x+'/'+y)??[])targets.push(point);
+      }
+    }
     for (const target of targets) {
       const d = distance(target,p);
       if (d < best) { best=d; result=target; }
@@ -155,7 +195,7 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
   }
   const pointer = (stage: Konva.Stage): Point | undefined => {
     const p = stage.getPointerPosition();
-    return p ? snapped([p.x/z,p.y/z]) : undefined;
+    return p ? snapped([(p.x+offset.x)/z,(p.y+offset.y)/z]) : undefined;
   };
   const points = (pts: Point[]) => pts.flatMap(([x,y]) => [x*z,y*z]);
   const verticesFor = (item: Item): Point[] => {
@@ -174,7 +214,7 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
   }
 
   return <div className={`viewer ${(mode==='pan'||space) ? 'panning' : mode==='select' ? '' : 'drawing'}`}
-    ref={scroll} data-testid="viewer"
+    ref={scroll} data-testid="viewer" onScroll={updateOverlay}
     onPointerDownCapture={e => {
       if(!scroll.current || !(e.button===1 || (e.button===0&&(mode==='pan'||spaceHeld.current))))return;
       e.preventDefault();e.stopPropagation();
@@ -186,16 +226,16 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
       scroll.current.scrollLeft=drag.current.left+drag.current.x-e.clientX;
       scroll.current.scrollTop=drag.current.top+drag.current.y-e.clientY;
     }} onPointerUp={() => { drag.current=null; }} onPointerCancel={() => { drag.current=null; }}>
-    {error && <div className="viewer-message" role="alert">{error}</div>}
+    {error && <div className="viewer-message" role="alert">{error} <button onClick={()=>setRetry(n=>n+1)}>Retry render</button></div>}
     {!ready && !error && <div className="viewer-message">Rendering sheet…</div>}
     <div ref={paper} className="paper" style={{width,height}} data-testid="paper" data-ready={ready}>
       <canvas ref={canvas} style={{width,height}} />
-      <div className="overlay">
-        <Stage width={width} height={height} onPointerMove={e => {
+      <div className="overlay" style={{left:offset.x,top:offset.y,right:'auto',bottom:'auto'}}>
+        <Stage width={Math.min(width,viewport.width)} height={Math.min(height,viewport.height)} onPointerMove={e => {
           if (mode!=='select' && mode!=='pan') setHover(pointer(e.target.getStage()!));
         }} onPointerLeave={() => setHover(undefined)}
           onClick={e => {
-            if (mode==='pan') return;
+            if (mode==='pan'||spaceHeld.current||e.evt.button!==0) return;
             if (mode==='select') { if (e.target===e.target.getStage()) select(); return; }
             if (!ready) return;
             const p = pointer(e.target.getStage()!);
@@ -208,6 +248,7 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
             if (p) addPoint(p);
           }}>
           <Layer>
+            <Group x={-offset.x} y={-offset.y}>
             {calibration && !calibration.source.startsWith('Printed scale:') && <Line points={points(calibration.points)} listening={false}
               stroke="#1b6575" strokeWidth={1.5} dash={[5,4]} />}
             {[...items.filter(item=>item.id!==selected), ...items.filter(item=>item.id===selected)].map(item => {
@@ -221,8 +262,8 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
                 onClick={() => select(item.id)} onTap={() => select(item.id)}
                 dragBoundFunc={pos => {
                   const xs=item.points.map(p=>p[0]*z), ys=item.points.map(p=>p[1]*z);
-                  return {x:Math.max(-Math.min(...xs),Math.min(width-Math.max(...xs),pos.x)),
-                    y:Math.max(-Math.min(...ys),Math.min(height-Math.max(...ys),pos.y))};
+                  return {x:Math.max(-Math.min(...xs),Math.min(width-Math.max(...xs),pos.x+offset.x))-offset.x,
+                    y:Math.max(-Math.min(...ys),Math.min(height-Math.max(...ys),pos.y+offset.y))-offset.y};
                 }}
                 onDragEnd={e => {
                   if (e.target!==e.currentTarget) return;
@@ -259,6 +300,7 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
                 height={Math.abs(preview[1][1]-preview[0][1])*z} stroke={scopeColor(activeScope,colors)} dash={[5,3]} />}
               {pending.map(([x,y],i)=><Circle key={i} x={x*z} y={y*z} radius={4} fill="#123f49"/>)}
             </Group>}
+            </Group>
           </Layer>
         </Stage>
       </div>
