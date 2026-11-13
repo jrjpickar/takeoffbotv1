@@ -8,6 +8,7 @@ test('Tustin demolition floor plan reads its scale and paired dashed partitions'
   await page.goto('/');
   await page.getByLabel('Passcode').fill('local-browser-test-only');
   await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
   await page.getByTestId('upload').setInputFiles(fixture!);
   await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(48,{timeout:30000});
   await page.getByRole('searchbox',{name:'Search sheets'}).fill('D-1.0 demolition');

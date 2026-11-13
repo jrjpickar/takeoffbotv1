@@ -71,3 +71,7 @@ The hosted browser tests exercise dropping local plans, filtering the Pine Stree
 ### Tustin regression
 
 The engine scanned all 48 sheets in the supplied Tustin PDF. Sheet D-1.0 produced 23 partition candidates and the printed 1/4-inch-to-one-foot scale. Other sheets produced no supported takeoff candidates. Candidate lengths require estimator review and are not a verified total. The private Tustin and Pine Street plans are excluded from the deploy ZIP.
+
+### Large-file and grading verification
+
+Chromium opened, rendered and ran takeoff on a 1,073,741,809-byte sparse four-page PDF. The test exercised the tab-only fallback when browser storage quota was insufficient. This fixture checks the file-size path, not rendering speed for a dense plan set. A vector grading fixture returned 100 SF and 3.7 CY at 12 inches of verified average depth. The detector scanned all nine supplied Thousand Oaks plumbing sheets and returned zero grading items. No verified grading boundary was present in those sheets. Actual contour-based earthwork and large ZIPs at the size limit remain unverified.

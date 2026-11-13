@@ -7,6 +7,7 @@ export const scopes = {
   door: ['Doors', 'EA', '#1e68c9'],
   fixture: ['Fixtures', 'EA', '#b22c82'],
   sawcut: ['Sawcutting', 'LF', '#007b84'],
+  grading: ['Grading area', 'SF', '#506833'],
   millwork: ['Millwork', 'LF', '#755334'],
 } as const;
 export type Scope = keyof typeof scopes;
@@ -26,12 +27,12 @@ export interface State {
   notes: Record<number, string[]>; rules: Record<number, Rule[]>; markup: number | null;
 }
 export interface Sheet { name: string; width: number; height: number; planName?: string; keywords?: string[] }
-export interface Project { id: string; name: string; sheets: Sheet[]; state: State }
+export interface Project { id: string; name: string; sheets: Sheet[]; state: State; sessionOnly?:boolean }
 export interface Rule { scope: Scope; color: string; dashed: boolean }
 export const deskNames: Record<Scope,string> = {
   wall:'Demo interior stud walls', floor:'Remove flooring', ceiling:'Demo ceiling',
   slab:'Remove concrete slab', door:'Remove doors', fixture:'Remove plumbing fixtures',
-  sawcut:'Sawcut concrete', millwork:'Remove millwork',
+  sawcut:'Sawcut concrete', grading:'Grading excavation', millwork:'Remove millwork',
 };
 export interface PriceQuestion {
   key:string; title:string; detail?:string; tag:string; open:boolean;
@@ -92,7 +93,7 @@ export function measure(item: Item, scale?: Calibration) {
   if (p.length < 2) return null;
   const value = (item.tool === 'rect' ? Math.abs((p[0][0]-p[1][0])*(p[0][1]-p[1][1])) : area(p))*f*f;
   return value && Number.isFinite(value) ? { value, unit,
-    cy: item.scope === 'slab' && item.thickness ? value*item.thickness/324 : undefined } : null;
+    cy: (item.scope === 'slab'||item.scope==='grading') && item.thickness ? value*item.thickness/324 : undefined } : null;
 }
 export const quantity = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 export const currency = (n: number) => n.toLocaleString('en-US', {style:'currency',currency:'USD'});

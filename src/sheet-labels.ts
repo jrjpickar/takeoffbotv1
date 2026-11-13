@@ -6,6 +6,7 @@ const keywords:[string,RegExp][]=[
   ['Electrical',/\b(?:electrical|lighting plan|power plan)\b/i],
   ['Plumbing',/\b(?:plumbing|sanitary plan)\b/i],
   ['Structural',/\b(?:structural|foundation plan|framing plan)\b/i],
+  ['Grading',/\b(?:grading plan|earthwork plan|excavation plan)\b/i],
   ['Site plan',/\b(?:site plan|civil plan)\b/i],
   ['Roof plan',/\broof plan\b/i],
   ['Elevations',/\belevations?\b/i],

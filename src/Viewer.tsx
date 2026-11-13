@@ -1,9 +1,10 @@
+import { BlobRange } from './blob-range';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Stage, Layer, Group, Line, Rect, Circle, Text } from 'react-konva';
 import type Konva from 'konva';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import worker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { type Calibration, type Item, type Mode, type Point, type Sheet, type Scope, distance, scopeColor, type ScopeColors, measure, quantity, request } from './domain';
+import { type Calibration, type Item, type Mode, type Point, type Sheet, type Scope, distance, scopeColor, type ScopeColors, measure, quantity } from './domain';
 
 GlobalWorkerOptions.workerSrc = worker;
 interface Props {
@@ -79,45 +80,66 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
     if(x<bounds.left+16||x>bounds.right-16)el.scrollLeft+=x-(bounds.left+bounds.right)/2;
     if(y<bounds.top+16||y>bounds.bottom-16)el.scrollTop+=y-(bounds.top+bounds.bottom)/2;
   },[selected,index]);
+  useLayoutEffect(()=>{setReady(false);},[url,index]);
+  const [largeFile,setLargeFile]=useState<Blob>();
   const [doc, setDoc] = useState<Awaited<ReturnType<typeof getDocument>['promise']>>();
   useEffect(() => {
     let live = true;
-    setDoc(undefined);
+    setDoc(undefined);setLargeFile(undefined);
     setError('');
-    const ctl=new AbortController();
     const options={standardFontDataUrl:'/pdf-assets/standard_fonts/',cMapUrl:'/pdf-assets/cmaps/',
       cMapPacked:true,wasmUrl:'/pdf-assets/wasm/'};
     let task:ReturnType<typeof getDocument>|undefined;
     (async()=>{
       if(import.meta.env.MODE==='netlify'){
-        const bytes=await (await request(url,{signal:ctl.signal})).arrayBuffer();
+        const file=await (await import('./hosted')).hostedPlanBlob(url);
         if(!live)return;
-        task=getDocument({...options,data:bytes});
+        if(file.size>128*1024*1024){setLargeFile(file);return;}
+        const range=new BlobRange(file,error=>{if(live)setError(String(error));});
+        task=getDocument({...options,range,rangeChunkSize:256*1024,disableStream:true,disableAutoFetch:true});
       }else task=getDocument({...options,url});
       const loaded=await task.promise;
       if(live)setDoc(loaded);
     })().catch(e=>{if(live)setError(e.message);});
-    return ()=>{live=false;ctl.abort();void task?.destroy();};
+    return ()=>{live=false;void task?.destroy();};
   }, [url]);
   useEffect(() => {
-    if (!doc || !canvas.current) return;
+    if ((!doc&&!largeFile) || !canvas.current) return;
     let live = true;
     let cancel = () => {};
     const element = canvas.current;
-    setReady(false);
     setError('');
-    doc.getPage(index+1).then(page => {
-      if (!live) return;
-      const scale = Math.min(z * (window.devicePixelRatio || 1), 4096/Math.max(sheet.width,sheet.height));
-      const view = page.getViewport({scale});
-      element.width = Math.ceil(view.width);
-      element.height = Math.ceil(view.height);
-      const task = page.render({canvas:element, viewport:view});
-      cancel = () => task.cancel();
-      return task.promise.then(() => { if (live) setReady(true); });
-    }).catch(e => { if (live) setError(e.message); });
-    return () => { live=false; cancel(); };
-  }, [doc, index, z, sheet.width, sheet.height]);
+    const render=async()=>{
+      const scale=Math.min(z*(window.devicePixelRatio||1),4096/Math.max(sheet.width,sheet.height));
+      if(largeFile){
+        const blob=await (await import('./hosted')).renderLargePlan(url,largeFile,index,scale);
+        if(!live)return;
+        const image=await createImageBitmap(blob);
+        try{
+          if(!live)return;
+          element.width=image.width;element.height=image.height;
+          element.getContext('2d')!.drawImage(image,0,0);setReady(true);
+        }finally{image.close();}
+        return;
+      }
+      const page=await doc!.getPage(index+1);
+      if(!live)return;
+      const view=page.getViewport({scale});
+      const buffer=document.createElement('canvas');
+      buffer.width=Math.ceil(view.width);buffer.height=Math.ceil(view.height);
+      const task=page.render({canvas:buffer,viewport:view});
+      cancel=()=>task.cancel();
+      await task.promise;
+      if(!live)return;
+      element.width=buffer.width;element.height=buffer.height;
+      element.getContext('2d')!.drawImage(buffer,0,0);
+      setReady(true);
+    };
+    const timer=window.setTimeout(()=>{
+      render().catch(e=>{if(live)setError(e.message);});
+    },55);
+    return () => { live=false;clearTimeout(timer);cancel(); };
+  }, [doc, largeFile, url, index, z, sheet.width, sheet.height]);
 
   const bounded = (p: Point): Point => [clamp(p[0],sheet.width),clamp(p[1],sheet.height)];
   function snapped(p: Point, ignore?: string) {

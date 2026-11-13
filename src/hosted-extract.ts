@@ -15,14 +15,45 @@ const bar=/^A2Z SCALE BAR:\s*(\d+(?:\.\d+)?)\s*FT$/i;
 const scopeOf=(key:string)=>Object.hasOwn(scopes,key.toLowerCase()) ? key.toLowerCase() as Scope : undefined;
 const rgb=(components:number[]) => '#'+components.map(n=>Math.round(Math.max(0,Math.min(1,n))*255).toString(16).padStart(2,'0')).join('');
 
-let current:{id:string; doc:pdf.Document}|undefined;
+let current:{id:string; doc:pdf.Document; stream?:pdf.Stream}|undefined;
 async function document(id:string, file:Blob) {
   if(current?.id===id) return current.doc;
-  const doc=pdf.Document.openDocument(await file.arrayBuffer(),'application/pdf');
+  let stream:pdf.Stream|undefined;
+  let doc:pdf.Document;
+  if(typeof FileReaderSync!=='undefined'){
+    const reader=new FileReaderSync();
+    const chunkSize=256*1024;
+    const blocks=new Map<number,Uint8Array>();
+    stream=new pdf.Stream({
+      fileSize:()=>file.size,
+      read(memory,offset,length,position){
+        let written=0;
+        while(written<length&&position+written<file.size){
+          const cursor=position+written;
+          const base=Math.floor(cursor/chunkSize)*chunkSize;
+          let block=blocks.get(base);
+          if(!block){
+            block=new Uint8Array(reader.readAsArrayBuffer(file.slice(base,base+chunkSize)));
+            if(blocks.size>=32)blocks.delete(blocks.keys().next().value!);
+            blocks.set(base,block);
+          }
+          const start=cursor-base, count=Math.min(length-written,block.length-start);
+          if(count<=0)break;
+          memory.set(block.subarray(start,start+count),offset+written);
+          written+=count;
+        }
+        return written;
+      },
+      close(){blocks.clear();},
+    });
+    try{doc=pdf.Document.openDocument(stream,'application/pdf');}
+    catch(error){stream.destroy();throw error;}
+  }else doc=pdf.Document.openDocument(await file.arrayBuffer(),'application/pdf');
   current?.doc.destroy();
+  current?.stream?.destroy();
   sheetCache.clear();
   rasterCache.clear();
-  current={id,doc};
+  current={id,doc,stream};
   return doc;
 }
 function sheetInfo(page:pdf.Page,index:number):Sheet {
@@ -179,11 +210,12 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     styles.set(key,matches);
   };
   for(const rule of input.rules)map(rule.color,rule.dashed,rule.scope,null);
-  const namedLegend=labels.filter(label=>/^(?:DEMOLITION|DEMO) LEGENDS?$/i.test(label.text.trim()));
+  const namedLegend=labels.filter(label=>/^(?:DEMOLITION|DEMO|GRADING|EARTHWORK|EXCAVATION) LEGENDS?$/i.test(label.text.trim()));
   for(const label of labels){
     const match=legend.exec(label.text);
     const scope=match?scopeOf(match[1]):demolitionLegend(label.text);
     if(!scope)continue;
+    if(!match&&scope==='grading'&&!labels.some(l=>/\b(?:grading|earthwork|excavation) (?:plan|legend)\b/i.test(l.text)))continue;
     if(!match&&raster&&scope==='wall')continue;
     const [left,top,,bottom]=label.bounds;
     // Ordinary notes are only considered in a demolition legend column.
@@ -297,4 +329,13 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     grouped.set(key,(grouped.get(key)??0)+1);
   }
   send('warnings',[...grouped].slice(0,8).map(([message,count])=>count===1?message:`${message} (${count})`));
+}
+
+export async function renderLarge(id:string,file:Blob,index:number,scale:number){
+  const page=(await document(id,file)).loadPage(index);
+  try{
+    const pix=page.toPixmap(pdf.Matrix.scale(scale,scale),pdf.ColorSpace.DeviceRGB,false,true);
+    try{return new Blob([Uint8Array.from(pix.asPNG()).buffer],{type:'image/png'});}
+    finally{pix.destroy();}
+  }finally{page.destroy();}
 }

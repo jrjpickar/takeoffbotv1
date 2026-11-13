@@ -30,6 +30,7 @@ function sheetMatches(name:string, filter:Scope|'demo'|'all') {
   const demo=/\b(?:demo(?:lition)?|removal|strip[- ]?out|tear[- ]?out)\b/i.test(name);
   if(filter==='demo')return demo;
   if(filter==='ceiling')return /\b(?:ceiling|rcp)\b/i.test(name);
+  if(filter==='grading')return /\b(?:grading|excavation|earthwork)\b/i.test(name);
   if(!demo)return false;
   const cues:Partial<Record<Scope,RegExp>>={
     wall:/\b(?:walls?|partitions?|floor plan|demolition plan)\b/i,
@@ -263,7 +264,7 @@ function App() {
       setState(result);setSaved(result);
       setUndo(prev=>prev.map(s=>({...s,revision:result.revision})));
       setRedo(prev=>prev.map(s=>({...s,revision:result.revision})));
-      setNotice(`Saved revision ${result.revision}.`);
+      setNotice(project?.sessionOnly?`Saved revision ${result.revision} for this tab only.`:`Saved revision ${result.revision}.`);
     } catch(e) {report(e);}
     finally {setBusy('');}
   }
@@ -561,13 +562,13 @@ function App() {
             <label>Assigned scope <select value={item.scope} onChange={e=>{
               const target=e.target.value as Scope;
               setScope(target);
-              edit({...item,scope:target,status:'review',edited:true,thickness:target==='slab'?item.thickness:null});
+              edit({...item,scope:target,status:'review',edited:true,thickness:target===item.scope?item.thickness:null});
               setHidden(hidden.filter(s=>s!==target));
             }}>{scopeKeys.filter(key=>toolsFor(key).includes(item.tool)).map(key=><option key={key} value={key}>{scopes[key][0]}</option>)}</select></label>
-            {item.scope==='slab' && <label>Slab thickness (in) <input type="number" step="any" min="0"
+            {(item.scope==='slab'||item.scope==='grading') && <label>{item.scope==='grading'?'Verified average depth (in)':'Slab thickness (in)'} <input type="number" step="any" min="0"
               value={item.thickness ?? ''} onChange={e=>edit({...item,thickness:Number(e.target.value)>0?Number(e.target.value):null,
                 status:'review',edited:true})}/></label>}
-            {item.scope==='slab' && <p>{item.thickness ? `${quantity(measure(item,cal)?.cy ?? 0)} CY` : 'Enter verified thickness to calculate volume.'}</p>}
+            {(item.scope==='slab'||item.scope==='grading') && <p>{item.thickness ? `${quantity(measure(item,cal)?.cy ?? 0)} CY` : 'Enter verified depth or thickness to calculate volume.'}</p>}
             {!measure(item,cal) && <p>Check geometry and sheet scale before approval.</p>}
             <div className="inline wrap">
               <button className="primary" disabled={!measure(item,cal)||item.status==='approved'}
@@ -629,7 +630,7 @@ function App() {
       <p>Drop a {import.meta.env.MODE==='netlify'?'PDF or ZIP':'PDF'} here, or choose a local file.</p>
       <button className="primary" disabled={!!busy} onClick={()=>upload.current?.click()}>Choose local PDF</button>
     </div></main>}
-    <footer><span>{project ? `Revision ${state.revision}${dirty?' · Unsaved changes':''}` : 'Local project storage'}</span>
+    <footer><span>{project?.sessionOnly?'Tab-only storage · Export before closing · ':''}{project ? `Revision ${state.revision}${dirty?' · Unsaved changes':''}` : 'Local project storage'}</span>
       <span role={error?'alert':'status'} className={error?'error':''}>{error || busy || notice}</span></footer>
   </div>;
 }

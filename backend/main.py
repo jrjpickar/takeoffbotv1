@@ -94,15 +94,17 @@ def csv_for(p, state):
     w.writerow(["Takeoff Name", "Takeoff Description", "Sq Ft", "Ln Ft", "Cu Yd", "EA",
                 "Marker Count", "Drop Count", "Takeoff Quantity", "Takeoff Unit", "Scale", "Plan Name"])
     totals = {}
-    unit_names = {"SF": "Sq Ft", "LF": "Ln Ft", "EA": "EA"}
+    unit_names = {"SF": "Sq Ft", "LF": "Ln Ft", "EA": "EA", "CY": "Cu Yd"}
     for item in state.items:
         if item.status != "approved":
             continue
         name, unit, _ = SCOPES[item.scope]
-        scale = state.scales.get(item.sheet)
+        measured = measure(state, item)
+        if item.scope == "grading" and "CY" in measured:
+            unit = "CY"
         key = (item.sheet, name, unit)
         values, ids = totals.setdefault(key, ({}, []))
-        for u, q in measure(state, item).items():
+        for u, q in measured.items():
             values[u] = values.get(u, 0) + q
         ids.append(item.id)
     for (sheet, name, unit), (values, ids) in totals.items():

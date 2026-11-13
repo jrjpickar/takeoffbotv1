@@ -8,6 +8,7 @@ test('Pine ZIP imports and produces wall candidates',async({page})=>{
   await page.goto('/');
   await page.getByLabel('Passcode').fill('local-browser-test-only');
   await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
   await page.getByTestId('upload').setInputFiles(fixture!);
   await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(44,{timeout:60000});
   await page.getByRole('button',{name:/^A-1\.01\b/}).click();
@@ -67,6 +68,7 @@ test('Pine ceiling hatch and switching scopes',async({page})=>{
   await page.goto('/');
   await page.getByLabel('Passcode').fill('local-browser-test-only');
   await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
   await page.getByTestId('upload').setInputFiles(fixture!);
   const filter=page.getByLabel('Filter sheets');
   await filter.selectOption('demo');

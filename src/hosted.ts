@@ -2,7 +2,8 @@ import { planFiles } from './plan-files';
 import { measure, factor, deskNames, type Project, type State, type Sheet } from './domain';
 import sample from '../samples/interior-demo.pdf?url';
 
-type Stored = Omit<Project,'state'> & {file:Blob; revisions:State[]};
+type Stored = Omit<Project,'state'> & {file?:Blob; diskName?:string; revisions:State[]};
+const sessionPlans=new Map<string,Stored>();
 type WorkerEvent = {kind:string;data:unknown};
 let worker:Worker|undefined;
 let nextJob=0;
@@ -58,13 +59,20 @@ async function list() {
     const request=conn.transaction('projects').objectStore('projects').index('name').openKeyCursor();
     request.onsuccess=()=>{
       const cursor=request.result;
-      if(!cursor){resolve(output);return;}
+      if(!cursor){resolve([...output,...Array.from(sessionPlans.values(),p=>({id:p.id,name:p.name}))]);return;}
       output.push({id:String(cursor.primaryKey),name:String(cursor.key)});cursor.continue();
     };
     request.onerror=()=>reject(request.error);
   });
 }
 async function save(id:string,state:State) {
+  const session=sessionPlans.get(id);
+  if(session){
+    if(session.revisions.at(-1)?.revision!==state.revision)throw new Error('A newer revision exists.');
+    const saved={...state,revision:state.revision+1};
+    session.revisions.push(saved);
+    return saved;
+  }
   const conn=await database();
   return new Promise<State>((resolve,reject)=>{
     const tx=conn.transaction('projects','readwrite');
@@ -86,14 +94,16 @@ async function save(id:string,state:State) {
 }
 
 function csv(project:Stored,state:State,forPricing=false) {
-  const groups=new Map<string,{sheet:number;name:string;unit:'SF'|'LF'|'EA';value:number;cy:number;ids:string[]}>();
+  const groups=new Map<string,{sheet:number;name:string;unit:'SF'|'LF'|'EA'|'CY';value:number;cy:number;ids:string[]}>();
   for(const item of state.items){
     if(item.status!=='approved')continue;
     const q=measure(item,state.scales[item.sheet]);
     if(!q)throw new Error('An approved measurement has invalid geometry or scale.');
-    const key=`${item.sheet}/${item.scope}`;
-    const group=groups.get(key)??{sheet:item.sheet,name:deskNames[item.scope],unit:q.unit,value:0,cy:0,ids:[]};
-    group.value+=q.value;group.cy+=q.cy??0;group.ids.push(item.id);groups.set(key,group);
+    const volume=item.scope==='grading'&&q.cy!==undefined;
+    const unit=volume?'CY':q.unit;
+    const key=`${item.sheet}/${item.scope}/${unit}`;
+    const group=groups.get(key)??{sheet:item.sheet,name:deskNames[item.scope],unit,value:0,cy:0,ids:[]};
+    group.value+=volume?q.cy!:q.value;group.cy+=q.cy??0;group.ids.push(item.id);groups.set(key,group);
   }
   const rows:(number|string)[][]=[['Takeoff Name','Takeoff Description','Sq Ft','Ln Ft','Cu Yd','EA',
     'Marker Count','Drop Count','Takeoff Quantity','Takeoff Unit','Scale','Plan Name']];
@@ -102,9 +112,22 @@ function csv(project:Stored,state:State,forPricing=false) {
     const fmt=(n:number)=>n.toFixed(6);
     rows.push([g.name,forPricing?'':`Measurement IDs: ${g.ids.join(', ')}`,fmt(g.unit==='SF'?g.value:0),
       fmt(g.unit==='LF'?g.value:0),fmt(g.cy),fmt(g.unit==='EA'?g.value:0),0,0,fmt(g.value),
-      {SF:'Sq Ft',LF:'Ln Ft',EA:'EA'}[g.unit],!forPricing&&scale?`${scale.toPrecision(10)} ft/pt`:'',forPricing?`Sheet ${g.sheet+1}`:(view.planName??view.name)]);
+      {SF:'Sq Ft',LF:'Ln Ft',EA:'EA',CY:'Cu Yd'}[g.unit],!forPricing&&scale?`${scale.toPrecision(10)} ft/pt`:'',forPricing?`Sheet ${g.sheet+1}`:(view.planName??view.name)]);
   }
   return rows.map(row=>row.map(value=>/[",\r\n]/.test(String(value))?`"${String(value).replaceAll('"','""')}"`:String(value)).join(',')).join('\r\n')+'\r\n';
+}
+
+async function storedFile(project:Stored):Promise<Blob> {
+  if(project.file)return project.file;
+  const directory=await navigator.storage.getDirectory();
+  return (await directory.getFileHandle(project.diskName!)).getFile();
+}
+
+export async function hostedPlanBlob(path:string):Promise<Blob> {
+  const id=path.split('/')[3];
+  const project=sessionPlans.get(id)??await access<Stored|undefined>('readonly',store=>store.get(id));
+  if(!project)throw new Error('Saved plan was not found.');
+  return storedFile(project);
 }
 
 export async function hostedRequest(path:string,init?:RequestInit):Promise<Response> {
@@ -118,34 +141,58 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
       : (init?.body as FormData).get('file');
     if(!(file instanceof File))throw new Error('Choose a PDF or ZIP of PDF plans.');
     const imported:Stored[]=[];
-    for(const plan of await planFiles(file)){
-      if(await plan.slice(0,5).text()!=='%PDF-')throw new Error(`Unreadable PDF: ${plan.name}`);
-      const id=crypto.randomUUID(), views=await extract<Sheet[]>({action:'sheets',id,file:plan});
-      const state:State={revision:0,items:[],rules:{},scales:{},notes:{},markup:null};
-      imported.push({id,file:plan,name:plan.name,sheets:views,revisions:[state]});
-    }
-    await access('readwrite',store=>{
-      for(const plan of imported.slice(0,-1))store.add(plan);
-      return store.add(imported.at(-1)!);
-    });
-    const first=imported[0];
-    return json({id:first.id,name:first.name,sheets:first.sheets,state:first.revisions[0],importCount:imported.length});
+    const cleanup:(()=>Promise<void>)[]=[];
+    const rollback:(()=>Promise<void>)[]=[];
+    try{
+      for(const plan of await planFiles(file,cleanup)){
+        if(await plan.slice(0,5).text()!=='%PDF-')throw new Error(`Unreadable PDF: ${plan.name}`);
+        const id=crypto.randomUUID(), views=await extract<Sheet[]>({action:'sheets',id,file:plan});
+        const state:State={revision:0,items:[],rules:{},scales:{},notes:{},markup:null};
+        const entry:Stored={id,name:plan.name,sheets:views,revisions:[state]};
+        if(plan.size>128*1024*1024){
+          const directory=await navigator.storage.getDirectory();
+          const diskName=`plan-${id}.pdf`;
+          const handle=await directory.getFileHandle(diskName,{create:true});
+          rollback.push(()=>directory.removeEntry(diskName));
+          try{
+            const storage=await navigator.storage.estimate();
+            if(storage.quota!==undefined&&storage.quota-(storage.usage??0)<plan.size)
+              throw new DOMException('Browser storage is full.','QuotaExceededError');
+            await plan.stream().pipeTo(await handle.createWritable());
+            entry.diskName=diskName;
+          }catch(error){
+            if(!(error instanceof DOMException)||error.name!=='QuotaExceededError'||/\.zip$/i.test(file.name))throw error;
+            entry.file=plan;
+            sessionPlans.set(id,entry);
+          }
+        }else entry.file=plan;
+        imported.push(entry);
+      }
+      const durable=imported.filter(plan=>!sessionPlans.has(plan.id));
+      if(durable.length)await access('readwrite',store=>{
+        for(const plan of durable.slice(0,-1))store.add(plan);
+        return store.add(durable.at(-1)!);
+      });
+      if(!imported.some(plan=>sessionPlans.has(plan.id)))rollback.length=0;
+      const first=imported[0];
+      return json({id:first.id,name:first.name,sheets:first.sheets,state:first.revisions[0],importCount:imported.length,sessionOnly:sessionPlans.has(first.id)});
+    }finally{await Promise.allSettled([...cleanup,...rollback].map(remove=>remove()));}
   }
   const [, , , id, action, sheet, sub]=url.pathname.split('/');
-  const project=await access<Stored|undefined>('readonly',s=>s.get(id));
+  const project=sessionPlans.get(id)??await access<Stored|undefined>('readonly',s=>s.get(id));
   if(!project)throw new Error('Project not found in this browser.');
-  const {file,name,sheets,revisions}=project;
+  const {name,sheets,revisions}=project;
   if(!action&&method==='GET'){
     const number=url.searchParams.get('revision');
     const state=number===null?revisions.at(-1):revisions[Number(number)];
     if(!state)throw new Error('Revision not found.');
     const views=sheets.some(view=>!view.keywords)
-      ? await extract<Sheet[]>({action:'sheets',id,file})
+      ? await extract<Sheet[]>({action:'sheets',id,file:await storedFile(project)})
       : sheets;
-    return json({id,name,sheets:views,state});
+    return json({id,name,sheets:views,state,sessionOnly:sessionPlans.has(id)});
   }
   if(!action&&method==='PUT')return json(await save(id,body()));
-  if(action==='pdf')return new Response(file,{headers:{'Content-Type':'application/pdf'}});
+  if(action==='pdf')return new Response(await storedFile(project),{headers:{'Content-Type':'application/pdf'}});
   if(action==='csv')return new Response(csv(project,body()),{headers:{'Content-Type':'text/csv'}});
   if(action==='price'){
     const state=body() as State;
@@ -156,6 +203,7 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
   }
   const index=Number(sheet);
   if(action!=='sheets'||!Number.isInteger(index)||!sheets[index])throw new Error('Sheet not found.');
+  const file=await storedFile(project);
   if(sub==='vectors')return json(await extract({action:'vectors',id,file,index}));
   if(sub==='run'){
     const encoder=new TextEncoder();
@@ -173,4 +221,8 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
     return new Response(stream,{headers:{'Content-Type':'text/event-stream'}});
   }
   throw new Error('Action not supported.');
+}
+
+export function renderLargePlan(path:string,file:Blob,index:number,scale:number) {
+  return extract<Blob>({action:'render',id:path.split('/')[3],file,index,scale});
 }

@@ -17,6 +17,7 @@ const patterns=labels.map(([scope,words])=>[scope,new RegExp(
 
 export function demolitionLegend(text:string):Scope|undefined {
   const label=text.trim().replace(/\s+/g,' ').replace(/[.:]$/,'');
+  if(/^(?:(?:grading|excavation|over[- ]excavation|cut|fill|earthwork) (?:area|limits|boundary)|limits of (?:grading|excavation))$/i.test(label))return 'grading';
   if(/^(?:saw[ -]?cut(?:ting)?(?: (?:lines?|concrete))?|concrete saw[ -]?cut)$/i.test(label))return 'sawcut';
   return patterns.find(([,pattern])=>pattern.test(label))?.[0];
 }

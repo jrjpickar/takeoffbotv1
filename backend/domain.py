@@ -13,11 +13,12 @@ SCOPES = {
     "door": ("Remove doors", "EA", "#2662bb"),
     "fixture": ("Remove plumbing fixtures", "EA", "#a12273"),
     "sawcut": ("Sawcut concrete", "LF", "#00767f"),
+    "grading": ("Grading excavation", "SF", "#506833"),
     "millwork": ("Remove millwork", "LF", "#775b38"),
 }
 Point = tuple[FiniteFloat, FiniteFloat]
 Tool = Literal["line", "polyline", "polygon", "rect", "count"]
-Scope = Literal["wall", "floor", "ceiling", "slab", "door", "fixture", "sawcut", "millwork"]
+Scope = Literal["wall", "floor", "ceiling", "slab", "door", "fixture", "sawcut", "millwork", "grading"]
 
 class Measurement(BaseModel):
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
@@ -78,6 +79,6 @@ def quantities(item, scale):
     if area <= 0:
         return {}
     result = {"SF": area * scale**2}
-    if item.scope == "slab" and item.thickness:
+    if item.scope in {"slab", "grading"} and item.thickness:
         result["CY"] = result["SF"] * item.thickness / 324
     return result

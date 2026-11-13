@@ -1,11 +1,11 @@
 const engine = import('./hosted-extract');
 
 let queue = Promise.resolve();
-self.onmessage = ({data:{job,action,id,file,index,input}}) => {
+self.onmessage = ({data:{job,action,id,file,index,input,scale}}) => {
   queue=queue.then(async()=>{
     const emit=(kind:string,data:unknown)=>self.postMessage({job,kind,data});
     try{
-      const {run,sheets,vectors}=await engine;
+      const {run,sheets,vectors,renderLarge}=await engine;
       if(action==='run'){
         let batch:unknown[]=[];
         const flush=()=>{if(batch.length){emit('measurements',batch);batch=[];}};
@@ -17,6 +17,7 @@ self.onmessage = ({data:{job,action,id,file,index,input}}) => {
         });
         flush();
       }
+      else if(action==='render')emit('result',await renderLarge(id,file,index,scale));
       else emit('result',await (action==='sheets'?sheets(id,file):vectors(id,file,index)));
       emit('done',null);
     }catch(error){emit('failed',error instanceof Error?error.message:'PDF processing failed.');}

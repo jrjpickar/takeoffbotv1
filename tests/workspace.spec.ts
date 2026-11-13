@@ -22,6 +22,7 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   if(await page.locator('html[data-hosted]').count()){
     await page.getByLabel('Passcode').fill('local-browser-test-only');
     await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
   }
   const chooser=page.waitForEvent('filechooser');
   await page.getByRole('button',{name:/^Upload PDF/}).click();
@@ -124,6 +125,7 @@ test('draw remaining tools and move a count on the original plan',async({page})=
   if(await page.locator('html[data-hosted]').count()){
     await page.getByLabel('Passcode').fill('local-browser-test-only');
     await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
   }
   await page.getByRole('button',{name:'Open sample'}).click();
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true');
@@ -188,6 +190,7 @@ test('standard legend finds non-wall geometry and keeps identical types the same
   test.skip(!(await page.locator('html[data-hosted]').count()),'Hosted PDF engine coverage');
   await page.getByLabel('Passcode').fill('local-browser-test-only');
   await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
   await page.getByTestId('upload').setInputFiles('tests/demolition-legend.pdf');
   await page.getByRole('button',{name:'Run colors…'}).click();
   await page.getByLabel('Run color for Doors').fill('#0055ff');
@@ -213,6 +216,7 @@ test('local files can be dropped onto the workspace',async({page})=>{
   if(hosted){
     await page.getByLabel('Passcode').fill('local-browser-test-only');
     await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
   }
   await page.getByRole('button',{name:'Open sample'}).waitFor();
   const bytes=readFileSync('samples/interior-demo.pdf').toString('base64');
@@ -233,6 +237,7 @@ test('sheet keyword fallback is searchable and theme persists',async({page})=>{
   await expect(page.locator('html')).toHaveAttribute('data-theme','light');
   await page.getByLabel('Passcode').fill('local-browser-test-only');
   await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
   await page.getByTestId('upload').setInputFiles('tests/demolition-legend.pdf');
   const search=page.getByRole('searchbox',{name:'Search sheets'});
   const sheets=page.getByRole('navigation',{name:'Sheets'});
@@ -247,4 +252,20 @@ test('sheet keyword fallback is searchable and theme persists',async({page})=>{
   await expect(page.locator('html')).toHaveAttribute('data-theme','light');
   await page.getByRole('button',{name:'Dark mode',exact:true}).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+});
+
+test('grading legend creates area and verified depth computes volume',async({page})=>{
+  await page.goto('/');
+  test.skip(!(await page.locator('html[data-hosted]').count()),'Hosted grading rule');
+  await page.getByLabel('Passcode').fill('local-browser-test-only');
+  await page.getByRole('button',{name:'Unlock'}).click();
+  await expect(page.getByRole('button',{name:'Open sample'})).toBeEnabled();
+  await page.getByTestId('upload').setInputFiles('tests/grading-fixture.pdf');
+  await page.getByRole('button',{name:'Run sheet takeoff'}).click();
+  const grade=page.locator('.measurements button').filter({hasText:'Grading area'});
+  await expect(grade).toHaveCount(1);
+  await expect(grade).toContainText('100 SF');
+  await grade.click();
+  await page.getByLabel('Verified average depth (in)').fill('12');
+  await expect(page.locator('.selection')).toContainText('3.7 CY');
 });
