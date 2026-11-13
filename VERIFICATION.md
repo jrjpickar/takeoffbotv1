@@ -47,3 +47,7 @@ The supplied archive included a Desk CSV fixture and plan-text fixture. It did n
 - The hosted variant keeps the uploaded PDF and saved takeoff on-device. The pricing function receives the scope quantities and markup, with anonymous sheet numbers. The public bundle excludes the Desk rate tables. Hosted raster detection flags a backdrop for manual tracing.
 - The Netlify account session reached sign-in. No live deployment URL or Netlify-hosted execution was verified.
 - The passcode-gated hosted build passed both Chromium workflows. The function test verified missing configuration, wrong passcodes, missing or tampered cookies, pricing with a valid session, and invalidation after rotation. Run it with `node --test tests/netlify-auth.mjs`. Live Netlify deployment was not performed.
+
+## Pine Street regression
+
+The hosted Chromium test imported the supplied 44-sheet ZIP, ignored macOS metadata, manually calibrated sheet A-1.01, and returned 26 editable wall centerline candidates with one review note. It also verified clear and undo, saved custom colors, reload, wheel zoom, and Space-drag pan. Two existing hosted browser workflows passed. The raster rule was tested on this one drawing layout. No complete wall-length accuracy or door/fixture coverage was established. The private PDF is excluded from the release.

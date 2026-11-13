@@ -1,13 +1,13 @@
 export type Point = [number, number];
 export const scopes = {
-  wall: ['Interior walls', 'LF', '#c53344'],
+  wall: ['Interior walls', 'LF', '#c2410c'],
   floor: ['Flooring', 'SF', '#1b8a59'],
   ceiling: ['Ceilings', 'SF', '#8053c5'],
-  slab: ['Concrete slab', 'SF', '#c25516'],
+  slab: ['Concrete slab', 'SF', '#a16b00'],
   door: ['Doors', 'EA', '#1e68c9'],
   fixture: ['Fixtures', 'EA', '#b22c82'],
   sawcut: ['Sawcutting', 'LF', '#007b84'],
-  millwork: ['Millwork', 'LF', '#835d40'],
+  millwork: ['Millwork', 'LF', '#755334'],
 } as const;
 export type Scope = keyof typeof scopes;
 export type Tool = 'line' | 'polyline' | 'polygon' | 'rect' | 'count';
@@ -18,7 +18,10 @@ export interface Item {
   status: Status; source: string; thickness: number | null; edited: boolean;
 }
 export interface Calibration { points: [Point, Point]; feet: number; source: string }
+export type ScopeColors = Partial<Record<Scope,string>>;
+export const scopeColor = (scope:Scope, colors?:ScopeColors) => colors?.[scope] ?? scopes[scope][2];
 export interface State {
+  colors?: ScopeColors;
   revision: number; items: Item[]; scales: Record<number, Calibration>;
   notes: Record<number, string[]>; rules: Record<number, Rule[]>; markup: number | null;
 }

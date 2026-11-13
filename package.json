@@ -20,6 +20,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@zip.js/zip.js": "2.25.0",
     "konva": "10.9.1",
     "mupdf": "1.28.6",
     "pdfjs-dist": "5.7.284",

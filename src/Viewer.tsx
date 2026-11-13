@@ -1,22 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Stage, Layer, Group, Line, Rect, Circle, Text } from 'react-konva';
 import type Konva from 'konva';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import worker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { type Calibration, type Item, type Mode, type Point, type Sheet, type Scope, distance, scopes, measure, quantity, request } from './domain';
+import { type Calibration, type Item, type Mode, type Point, type Sheet, type Scope, distance, scopeColor, type ScopeColors, measure, quantity, request } from './domain';
 
 GlobalWorkerOptions.workerSrc = worker;
 interface Props {
-  url: string; index: number; sheet: Sheet; items: Item[]; calibration?: Calibration;
-  mode: Mode; activeScope: Scope; selected?: string; snap: boolean; zoom: number;
+  colors?: ScopeColors; url: string; index: number; sheet: Sheet; items: Item[]; calibration?: Calibration;
+  mode: Mode; activeScope: Scope; selected?: string; snap: boolean; zoom: number; setZoom:(zoom:number)=>void;
   vertices: Point[]; pending: Point[]; setPending: (p: Point[]) => void;
   addPoint: (p: Point) => void; select: (id?: string) => void;
   changePoints: (id: string, points: Point[]) => void;
 }
 const clamp = (n: number, max: number) => Math.max(0, Math.min(n, max));
 
-export function Viewer({ url, index, sheet, items, calibration, mode, activeScope, selected, snap,
-  zoom, vertices, pending, setPending, addPoint, select, changePoints }: Props) {
+export function Viewer({ colors, url, index, sheet, items, calibration, mode, activeScope, selected, snap,
+  zoom, setZoom, vertices, pending, setPending, addPoint, select, changePoints }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const drag = useRef<{x:number; y:number; left:number; top:number} | null>(null);
@@ -27,6 +27,43 @@ export function Viewer({ url, index, sheet, items, calibration, mode, activeScop
   const fit = Math.min(1.65, Math.max(160, viewport-40)/sheet.width);
   const z = fit*zoom;
   const width = sheet.width*z, height = sheet.height*z;
+  const paper=useRef<HTMLDivElement>(null);
+  const anchor=useRef<{x:number;y:number;offsetX:number;offsetY:number}|undefined>(undefined);
+  const [space,setSpace]=useState(false);
+  const spaceHeld=useRef(false);
+  useEffect(()=>{
+    const key=(event:KeyboardEvent)=>{
+      if(event.code!=='Space'||(event.type==='keydown'&&!scroll.current?.matches(':hover'))||(event.type==='keydown'&&event.target instanceof HTMLElement&&event.target.closest('input,textarea,select,[contenteditable]')))return;
+      event.preventDefault();spaceHeld.current=event.type==='keydown';setSpace(spaceHeld.current);
+    };
+    const reset=()=>{spaceHeld.current=false;setSpace(false);drag.current=null;};
+    window.addEventListener('keydown',key);window.addEventListener('keyup',key);window.addEventListener('blur',reset);
+    return ()=>{window.removeEventListener('keydown',key);window.removeEventListener('keyup',key);window.removeEventListener('blur',reset);};
+  },[]);
+  useEffect(()=>{
+    const el=scroll.current;
+    if(!el)return;
+    const wheel=(event:WheelEvent)=>{
+      if(!paper.current)return;
+      event.preventDefault();
+      const next=Math.max(.35,Math.min(12,zoom*Math.exp(-Math.max(-160,Math.min(160,event.deltaY*(event.deltaMode===1?16:1)))*.0025)));
+      if(next===zoom)return;
+      const viewport=el.getBoundingClientRect(), sheetRect=paper.current.getBoundingClientRect();
+      anchor.current={x:(event.clientX-sheetRect.left)/z,y:(event.clientY-sheetRect.top)/z,
+        offsetX:event.clientX-viewport.left,offsetY:event.clientY-viewport.top};
+      setZoom(next);
+    };
+    el.addEventListener('wheel',wheel,{passive:false});
+    return ()=>el.removeEventListener('wheel',wheel);
+  },[zoom,z,setZoom]);
+  useLayoutEffect(()=>{
+    const el=scroll.current, pin=anchor.current;
+    if(!el||!paper.current||!pin)return;
+    anchor.current=undefined;
+    const sheetRect=paper.current.getBoundingClientRect(), viewport=el.getBoundingClientRect();
+    el.scrollLeft+=sheetRect.left-viewport.left+pin.x*z-pin.offsetX;
+    el.scrollTop+=sheetRect.top-viewport.top+pin.y*z-pin.offsetY;
+  },[z]);
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => setViewport(entry.contentRect.width));
     if (scroll.current) observer.observe(scroll.current);
@@ -104,10 +141,11 @@ export function Viewer({ url, index, sheet, items, calibration, mode, activeScop
       stroke={color} strokeWidth={weight} hitStrokeWidth={14} lineJoin="round" lineCap="round" />;
   }
 
-  return <div className={`viewer ${mode==='pan' ? 'panning' : mode==='select' ? '' : 'drawing'}`}
+  return <div className={`viewer ${(mode==='pan'||space) ? 'panning' : mode==='select' ? '' : 'drawing'}`}
     ref={scroll} data-testid="viewer"
-    onPointerDown={e => {
-      if (mode !== 'pan' || !scroll.current || e.button !== 0) return;
+    onPointerDownCapture={e => {
+      if(!scroll.current || !(e.button===1 || (e.button===0&&(mode==='pan'||spaceHeld.current))))return;
+      e.preventDefault();e.stopPropagation();
       const el = scroll.current;
       el.setPointerCapture(e.pointerId);
       drag.current={x:e.clientX,y:e.clientY,left:el.scrollLeft,top:el.scrollTop};
@@ -118,7 +156,7 @@ export function Viewer({ url, index, sheet, items, calibration, mode, activeScop
     }} onPointerUp={() => { drag.current=null; }} onPointerCancel={() => { drag.current=null; }}>
     {error && <div className="viewer-message" role="alert">{error}</div>}
     {!ready && !error && <div className="viewer-message">Rendering sheet…</div>}
-    <div className="paper" style={{width,height}} data-testid="paper" data-ready={ready}>
+    <div ref={paper} className="paper" style={{width,height}} data-testid="paper" data-ready={ready}>
       <canvas ref={canvas} style={{width,height}} />
       <div className="overlay">
         <Stage width={width} height={height} onPointerMove={e => {
@@ -141,7 +179,7 @@ export function Viewer({ url, index, sheet, items, calibration, mode, activeScop
             {calibration && <Line points={points(calibration.points)} listening={false}
               stroke="#1b6575" strokeWidth={1.5} dash={[5,4]} />}
             {[...items.filter(item=>item.id!==selected), ...items.filter(item=>item.id===selected)].map(item => {
-              const active = item.id===selected, color=scopes[item.scope][2];
+              const active = item.id===selected, color=scopeColor(item.scope,colors);
               const [x,y] = item.points[0];
               const qty = measure(item, calibration);
               const tag = qty ? `${quantity(qty.value)} ${qty.unit}` : 'Review';
@@ -182,11 +220,11 @@ export function Viewer({ url, index, sheet, items, calibration, mode, activeScop
               </Group>;
             })}
             {preview.length > 0 && <Group listening={false}>
-              <Line points={points(preview)} stroke={scopes[activeScope][2]} dash={[5,3]} strokeWidth={2}
+              <Line points={points(preview)} stroke={scopeColor(activeScope,colors)} dash={[5,3]} strokeWidth={2}
                 closed={mode==='polygon' && preview.length>2} />
               {mode==='rect' && preview.length===2 && <Rect x={Math.min(preview[0][0],preview[1][0])*z}
                 y={Math.min(preview[0][1],preview[1][1])*z} width={Math.abs(preview[1][0]-preview[0][0])*z}
-                height={Math.abs(preview[1][1]-preview[0][1])*z} stroke={scopes[activeScope][2]} dash={[5,3]} />}
+                height={Math.abs(preview[1][1]-preview[0][1])*z} stroke={scopeColor(activeScope,colors)} dash={[5,3]} />}
               {pending.map(([x,y],i)=><Circle key={i} x={x*z} y={y*z} radius={4} fill="#123f49"/>)}
             </Group>}
           </Layer>

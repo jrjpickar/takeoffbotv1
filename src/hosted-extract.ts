@@ -1,4 +1,5 @@
 import * as pdf from 'mupdf';
+import { wallPairs } from './raster-walls';
 import { distance, measure, scopes, type Calibration, type Item, type Point, type Rule, type Scope, type Sheet } from './domain';
 
 type Stroke = {color:string; dashed:boolean; seq:number; items:[string,Point[]][]; points:Point[];
@@ -42,7 +43,7 @@ async function extract(id:string,file:Blob,index:number) {
   ];
   const paths:Stroke[]=[];
   const labels:{text:string;bounds:pdf.Rect}[]=[];
-  let raster=false;
+  let rasterCoverage=0;
   const device=new pdf.Device({
     strokePath(path,stroke,m,cs,color,alpha){
       if(alpha<=0) return;
@@ -74,7 +75,7 @@ async function extract(id:string,file:Blob,index:number) {
         beginLine(b){line='';bounds=[b[0]-x0,b[1]-y0,b[2]-x0,b[3]-y0];},
         onChar(c){line+=c;},
         endLine(){if(line.trim()) labels.push({text:line.trim(),bounds});},
-        onImageBlock(b){if((b[2]-b[0])*(b[3]-b[1])>=(x1-x0)*(y1-y0)*.5)raster=true;},
+        onImageBlock(b){rasterCoverage+=Math.max(0,Math.min(x1,b[2])-Math.max(x0,b[0]))*Math.max(0,Math.min(y1,b[3])-Math.max(y0,b[1]));},
       });
     }finally{text.destroy();}
     const annotations=page instanceof pdf.PDFPage ? page.getAnnotations().map(a=>{
@@ -86,7 +87,7 @@ async function extract(id:string,file:Blob,index:number) {
         type==='Circle'?[[(l+r)/2,(t+b)/2] as Point]:[]).map(([x,y])=>point(x,y,pdf.Matrix.identity));
       return {type,xref,text:a.getContents().trim(),points};
     }):[];
-    return {paths,labels,annotations,raster,width:x1-x0,height:y1-y0};
+    return {paths,labels,annotations,raster:rasterCoverage>=(x1-x0)*(y1-y0)*.5,width:x1-x0,height:y1-y0};
   }finally{device.destroy();page.destroy();}
 }
 export async function vectors(id:string,file:Blob,index:number) {
@@ -138,11 +139,7 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
   for(const label of labels){
     const match=legend.exec(label.text);
     const scope=match&&scopeOf(match[1]);
-    if(!scope){
-      if(/\b(?:DEMO(?:LISH|LITION)?|REMOVE|SAW\s*CUT|SCALE)\b/i.test(label.text))
-        warnings.push(`Plan text for manual cross-check: ${label.text.slice(0,160)}`);
-      continue;
-    }
+    if(!scope)continue;
     const [left,top,,bottom]=label.bounds;
     const options=paths.filter(p=>p.color&&left-p.bounds[2]>=0&&left-p.bounds[2]<=36&&
       (p.bounds[1]+p.bounds[3])/2>=top&&(p.bounds[1]+p.bounds[3])/2<=bottom);
@@ -169,7 +166,40 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
       emit(scope,'count',[[(l+r)/2,(t+b)/2]],source,`v${path.seq}`,thickness);
     } else warnings.push(`${source}: unsupported geometry for ${scope}.`);
   }
-  if(raster)warnings.push('Raster backdrop detected. Calibrate and trace raster geometry manually.');
+  const wallLegend=labels.find(label=>/^WALL(?:S)?\s+TO\s+BE\s+(?:DEMO(?:LISHED)?|REMOVED)\.?$/i.test(label.text));
+  const floorPlan=labels.some(label=>/^DEMO(?:LITION)?\s+FLOOR\s+PLAN$/i.test(label.text));
+  const redSwatch=wallLegend&&paths.filter(path=>path.color==='#ff0000'&&
+    path.bounds[2]<wallLegend.bounds[0]&&wallLegend.bounds[0]-path.bounds[2]<120&&
+    path.bounds[1]>=wallLegend.bounds[1]-22&&path.bounds[3]<=wallLegend.bounds[3]+22).length>=5;
+  if(raster&&wallLegend&&floorPlan&&redSwatch&&!input.rules.some(rule=>rule.scope==='wall')){
+    const page=(await document(id,file)).loadPage(index);
+    try {
+      const [x0,y0]=page.getBounds('CropBox');
+      const left=Math.ceil(Math.max(wallLegend.bounds[2]+20,width*.22));
+      const right=Math.floor(width*.83), top=Math.floor(height*.025), bottom=Math.floor(height*.96);
+      const scale=Math.min(2,4000/Math.max(right-left,bottom-top));
+      if(right>left&&bottom>top){
+        const x=Math.floor((x0+left)*scale), y=Math.floor((y0+top)*scale);
+        const pix=new pdf.Pixmap(pdf.ColorSpace.DeviceRGB,[x,y,Math.ceil((x0+right)*scale),Math.ceil((y0+bottom)*scale)],false);
+        const device=new pdf.DrawDevice(pdf.Matrix.identity,pix);
+        try{
+          pix.clear(255);
+          page.runPageContents(device,pdf.Matrix.scale(scale,scale));
+          device.close();
+          const pairs=wallPairs(pix.getPixels(),pix.getWidth(),pix.getHeight(),pix.getStride(),pix.getNumberOfComponents());
+          for(const [i,pts] of pairs.entries())emit('wall','line',pts.map(([u,v])=>[(u+x)/scale-x0,(v+y)/scale-y0]),
+            'Red paired wall outlines · WALL TO BE DEMO legend',`r${i}`,null);
+          if(pairs.length)warnings.push('Verify wall candidates against the drawing. Trace omitted diagonal, short, or interrupted walls manually. Doors and cubicles require separate review.');
+          else warnings.push('The wall legend matched, but no reliable paired red outlines were found.');
+        }finally{device.destroy();pix.destroy();}
+      }
+    }finally{page.destroy();}
+  }else if(raster)warnings.push('Raster backdrop detected. Calibrate and trace raster geometry manually.');
   if(!marks.size)warnings.push('No supported demolition geometry matched. Use manual tools or define a verified vector style rule.');
-  send('warnings',[...new Set(warnings)].slice(0,150));
+  const grouped=new Map<string,number>();
+  for(const warning of warnings){
+    const key=warning.replace(/^(?:Vector |Style rule |Tagged annotation |Annotation xref ).*?: /,'');
+    grouped.set(key,(grouped.get(key)??0)+1);
+  }
+  send('warnings',[...grouped].slice(0,8).map(([message,count])=>count===1?message:`${message} (${count})`));
 }

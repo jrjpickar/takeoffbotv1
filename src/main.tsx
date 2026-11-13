@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { Viewer } from './Viewer';
 import { type Calibration, type Item, type Mode, type Point, type Price, type Project,
   type Rule, type Scope, type State, type Tool, currency, deskNames, distance, factor, json, measure,
-  quantity, request, scopeKeys, scopes, toolsFor } from './domain';
+  quantity, request, scopeColor, scopeKeys, scopes, toolsFor } from './domain';
 import './styles.css';
 
 const names: Record<Mode,string> = {
@@ -290,13 +290,13 @@ function App() {
           <option value="" disabled>Open saved project</option>
           {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
         </select>}
-        <input ref={upload} data-testid="upload" type="file" accept=".pdf,application/pdf" hidden onChange={e=>{
+        <input ref={upload} data-testid="upload" type="file" accept={import.meta.env.MODE==='netlify' ? ".pdf,.zip,application/pdf,application/zip" : ".pdf,application/pdf"} hidden onChange={e=>{
           const file=e.target.files?.[0];e.target.value='';
           if (!file) return;
           const data=new FormData();data.set('file',file);
           void open('/api/projects',{method:'POST',body:data});
         }}/>
-        <button onClick={()=>upload.current?.click()} disabled={!!busy}>Upload PDF</button>
+        <button onClick={()=>upload.current?.click()} disabled={!!busy}>{import.meta.env.MODE==='netlify'?'Upload PDF / ZIP':'Upload PDF'}</button>
         <button onClick={()=>void open('/api/sample',{method:'POST'})} disabled={!!busy}>Open sample</button>
       </div>
     </header>
@@ -310,6 +310,11 @@ function App() {
         <label className="inline"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/> Snap</label>
         <div className="toolbar-end">
           <button onClick={()=>void run()}>Run sheet takeoff</button>
+          <button disabled={!localItems.length} onClick={()=>{
+            if(!window.confirm(`Clear ${localItems.length} takeoffs from this sheet? You can undo this.`))return;
+            commit({...state,items:state.items.filter(item=>item.sheet!==sheet),notes:{...state.notes,[sheet]:[]}});
+            setSelected(undefined);setPending([]);setNotice('Sheet takeoffs cleared. Calibration kept.');
+          }}>Clear sheet takeoffs</button>
           <button className="primary" onClick={()=>void save()}>Save</button>
         </div>
       </fieldset>
@@ -326,8 +331,11 @@ function App() {
             <input type="checkbox" aria-label={`Show ${scopes[key][0]}`} checked={!hidden.includes(key)}
               onChange={()=>setHidden(hidden.includes(key)?hidden.filter(s=>s!==key):[...hidden,key])}/>
             <button onClick={()=>changeScope(key)} aria-pressed={scope===key}>
-              <i style={{background:scopes[key][2]}}/>{scopes[key][0]} <small>{scopes[key][1]}</small>
+              <i style={{background:scopeColor(key,state.colors)}}/>{scopes[key][0]} <small>{scopes[key][1]}</small>
             </button>
+            <input className="layer-color" type="color" aria-label={`${scopes[key][0]} takeoff color`}
+              value={scopeColor(key,state.colors)} onChange={e=>commit({...state,
+                colors:{...state.colors,[key]:e.target.value}})}/>
           </div>)}
           <details className="rules">
             <summary>Vector style rules</summary>
@@ -351,11 +359,11 @@ function App() {
         </fieldset>
         <section className="drawing-panel">
           <div className="sheet-bar">
-            <div><strong>{project.sheets[sheet].name}</strong><small>{instruction}</small></div>
+            <div><strong>{project.sheets[sheet].name}</strong><small>{instruction} · Scroll to zoom · Space + drag to pan</small></div>
             <div className="inline">
               <button aria-label="Zoom out" onClick={()=>setZoom(v=>Math.max(.35,v/1.25))}>−</button>
               <button onClick={()=>setZoom(1)} title="Fit width">{Math.round(zoom*100)}%</button>
-              <button aria-label="Zoom in" onClick={()=>setZoom(v=>Math.min(6,v*1.25))}>+</button>
+              <button aria-label="Zoom in" onClick={()=>setZoom(v=>Math.min(12,v*1.25))}>+</button>
             </div>
           </div>
           {mode==='calibrate' && pending.length===2 && <form className="calibrate-bar" onSubmit={e=>{e.preventDefault();calibrate();}}>
@@ -366,9 +374,9 @@ function App() {
           {(mode==='polygon'||mode==='polyline') && pending.length>0 && <div className="calibrate-bar">
             <button onClick={()=>finish(mode,pending)}>Finish trace</button><button onClick={()=>setPending(pending.slice(0,-1))}>Remove last point</button>
           </div>}
-          <Viewer key={project.id} url={root+'/pdf'} index={sheet} sheet={project.sheets[sheet]} items={visible}
+          <Viewer colors={state.colors} key={project.id} url={root+'/pdf'} index={sheet} sheet={project.sheets[sheet]} items={visible}
             calibration={cal} mode={busy ? 'select' : mode} activeScope={scope} selected={busy ? undefined : selected} snap={snap}
-            zoom={zoom} vertices={vectors} pending={pending} setPending={setPending} addPoint={addPoint}
+            zoom={zoom} setZoom={setZoom} vertices={vectors} pending={pending} setPending={setPending} addPoint={addPoint}
             select={id=>{if(!busy)setSelected(id);}} changePoints={(id,points)=>{
               const target=state.items.find(i=>i.id===id);
               if (target && !busy) edit({...target,points,status:'review',edited:true});
@@ -384,7 +392,7 @@ function App() {
               const m=measure(i,cal);
               return <button key={i.id} className={i.id===selected?'active':''} onClick={()=>{
                 setSelected(i.id);setHidden(hidden.filter(s=>s!==i.scope));changeMode('select');
-              }}><i style={{background:scopes[i.scope][2]}}/><span>{scopes[i.scope][0]}
+              }}><i style={{background:scopeColor(i.scope,state.colors)}}/><span>{scopes[i.scope][0]}
                 <small>{i.status} · {i.edited?'edited':i.source.startsWith('Manual')?'manual':'rule match'}</small>
               </span><b>{m?`${quantity(m.value)} ${m.unit}`:'—'}</b></button>;
             })}
@@ -420,7 +428,7 @@ function App() {
             })}
             {!approved && <p>Approve measurements to include them.</p>}
           </details>
-          <details open className="warnings"><summary>Sheet warnings ({state.notes[sheet]?.length??0})</summary>
+          <details className="warnings"><summary>Sheet warnings ({state.notes[sheet]?.length??0})</summary>
             {state.notes[sheet]?.map((note,i)=><p key={i}>{note}</p>)}
             {!state.notes[sheet]?.length && <p>{state.notes[sheet]?'No extraction warnings.':'Run takeoff to check this sheet.'}</p>}
           </details>

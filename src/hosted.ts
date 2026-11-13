@@ -1,3 +1,4 @@
+import { planFiles } from './plan-files';
 import { measure, factor, deskNames, type Project, type State, type Sheet } from './domain';
 import sample from '../samples/interior-demo.pdf?url';
 
@@ -115,12 +116,20 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
   if((url.pathname==='/api/projects'||url.pathname==='/api/sample')&&method==='POST'){
     const file=url.pathname==='/api/sample' ? new File([await (await fetch(sample)).blob()],'Interior demolition sample.pdf',{type:'application/pdf'})
       : (init?.body as FormData).get('file');
-    if(!(file instanceof File)||await file.slice(0,5).text()!=='%PDF-')throw new Error('Upload a readable PDF.');
-    if(file.size>100*1024*1024)throw new Error('PDF exceeds 100 MiB.');
-    const id=crypto.randomUUID(), views=await extract<Sheet[]>({action:'sheets',id,file});
-    const state:State={revision:0,items:[],rules:{},scales:{},notes:{},markup:null};
-    await access('readwrite',s=>s.add({id,file,name:file.name,sheets:views,revisions:[state]}));
-    return json({id,name:file.name,sheets:views,state});
+    if(!(file instanceof File))throw new Error('Choose a PDF or ZIP of PDF plans.');
+    const imported:Stored[]=[];
+    for(const plan of await planFiles(file)){
+      if(await plan.slice(0,5).text()!=='%PDF-')throw new Error(`Unreadable PDF: ${plan.name}`);
+      const id=crypto.randomUUID(), views=await extract<Sheet[]>({action:'sheets',id,file:plan});
+      const state:State={revision:0,items:[],rules:{},scales:{},notes:{},markup:null};
+      imported.push({id,file:plan,name:plan.name,sheets:views,revisions:[state]});
+    }
+    await access('readwrite',store=>{
+      for(const plan of imported.slice(0,-1))store.add(plan);
+      return store.add(imported.at(-1)!);
+    });
+    const first=imported[0];
+    return json({id:first.id,name:first.name,sheets:first.sheets,state:first.revisions[0],importCount:imported.length});
   }
   const [, , , id, action, sheet, sub]=url.pathname.split('/');
   const project=await access<Stored|undefined>('readonly',s=>s.get(id));

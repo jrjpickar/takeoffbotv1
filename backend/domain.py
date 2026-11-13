@@ -47,6 +47,7 @@ class StyleRule(BaseModel):
 
 class Revision(BaseModel):
     revision: int = Field(ge=0)
+    colors: dict[Scope, str] = Field(default_factory=dict)
     items: list[Measurement] = Field(default_factory=list, max_length=20000)
     scales: dict[int, Calibration] = Field(default_factory=dict)
     notes: dict[int, list[str]] = Field(default_factory=dict)

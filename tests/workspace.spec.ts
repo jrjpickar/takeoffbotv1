@@ -24,7 +24,7 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
     await page.getByRole('button',{name:'Unlock'}).click();
   }
   const chooser=page.waitForEvent('filechooser');
-  await page.getByRole('button',{name:'Upload PDF'}).click();
+  await page.getByRole('button',{name:/^Upload PDF/}).click();
   await (await chooser).setFiles('samples/interior-demo.pdf');
   await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(4);
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true');
@@ -75,6 +75,7 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await expect(page.getByRole('status')).toHaveText('1 added for review.');
   await page.getByRole('button',{name:/Sheet 3/}).click();
   await page.getByRole('button',{name:'Run sheet takeoff'}).click();
+  await page.getByText(/Sheet warnings/).click();
   await expect(page.getByText(/Raster (sheet: OpenCV found|backdrop detected)/)).toBeVisible();
   await expect(page.locator('.measurements button')).toHaveCount(0);
 
