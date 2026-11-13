@@ -1,3 +1,4 @@
+import { sheetIdentity } from './sheet-labels';
 import { printedScale } from './sheet-scale';
 import * as pdf from 'mupdf';
 import { hatchAreas } from './hatch-areas';
@@ -26,7 +27,12 @@ async function document(id:string, file:Blob) {
 function sheetInfo(page:pdf.Page,index:number):Sheet {
   const [x0,y0,x1,y1]=page.getBounds('CropBox');
   const label=page.getLabel();
-  return {name:label ? `Sheet ${index+1} (${label})` : `Sheet ${index+1}`,
+  let identity=sheetIdentity(label,[]);
+  if(!identity.title){
+    const text=page.toStructuredText('');
+    try{identity=sheetIdentity(label,text.asText().split('\n'));}finally{text.destroy();}
+  }
+  return {name:identity.title ? `Sheet ${index+1} (${identity.title})` : `Sheet ${index+1}`,keywords:identity.keywords,
     width:x1-x0,height:y1-y0,planName:/^[A-Z]{1,3}[-.]?\d{1,3}(?:\.\d+)?[A-Z]?\b/.test(label)?`${label} - Sheet ${index+1}`:undefined};
 }
 export async function sheets(id:string,file:Blob) {

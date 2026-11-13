@@ -139,7 +139,10 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
     const number=url.searchParams.get('revision');
     const state=number===null?revisions.at(-1):revisions[Number(number)];
     if(!state)throw new Error('Revision not found.');
-    return json({id,name,sheets,state});
+    const views=sheets.some(view=>!view.keywords)
+      ? await extract<Sheet[]>({action:'sheets',id,file})
+      : sheets;
+    return json({id,name,sheets:views,state});
   }
   if(!action&&method==='PUT')return json(await save(id,body()));
   if(action==='pdf')return new Response(file,{headers:{'Content-Type':'application/pdf'}});

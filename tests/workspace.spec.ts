@@ -217,3 +217,26 @@ test('local files can be dropped onto the workspace',async({page})=>{
   await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(4);
   await expect(page.getByRole('combobox',{name:'Open saved project'}).locator('option:checked')).toHaveText('dropped-plan.pdf');
 });
+
+test('sheet keyword fallback is searchable and theme persists',async({page})=>{
+  await page.goto('/');
+  test.skip(!(await page.locator('html[data-hosted]').count()),'Hosted PDF metadata coverage');
+  await page.getByRole('button',{name:'Light mode',exact:true}).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+  await page.getByLabel('Passcode').fill('local-browser-test-only');
+  await page.getByRole('button',{name:'Unlock'}).click();
+  await page.getByTestId('upload').setInputFiles('tests/demolition-legend.pdf');
+  const search=page.getByRole('searchbox',{name:'Search sheets'});
+  const sheets=page.getByRole('navigation',{name:'Sheets'});
+  await expect(sheets.getByRole('button')).toContainText('Demolition');
+  await search.fill('missing sheet');
+  await expect(sheets).toContainText('No matching sheets.');
+  await search.fill('demo');
+  await expect(sheets.getByRole('button')).toHaveCount(1);
+  await search.press('Enter');
+  await expect(page.locator('.sheet-bar')).toContainText('Demolition');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+  await page.getByRole('button',{name:'Dark mode',exact:true}).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+});

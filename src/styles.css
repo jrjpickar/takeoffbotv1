@@ -33,7 +33,7 @@ h3{font-size:13px;margin-bottom:7px}
 p{line-height:1.45;color:var(--dm-text-2);margin:7px 0}
 small{font-size:11px;color:var(--dm-text-3)}
 .app{display:flex;flex-direction:column;height:100dvh;min-height:480px}
-header{height:56px;flex:none;background:var(--dm-bg);color:var(--dm-surface);display:flex;align-items:center;gap:14px;padding:0 18px}
+header{height:56px;flex:none;background:var(--dm-bg);color:var(--dm-text);display:flex;align-items:center;gap:14px;padding:0 18px}
 .brand{display:flex;align-items:center;gap:10px;white-space:nowrap}
 .brand strong{background:var(--dm-accent);color:var(--dm-bg);border-radius:4px;padding:4px 7px;font-size:17px}
 .brand span{font-weight:700;font-size:17px}
@@ -121,3 +121,26 @@ footer{background:var(--dm-surface-2);border-top:1px solid var(--dm-border);disp
 .file-drop-overlay{position:fixed;z-index:30;inset:12px;display:grid;place-items:center;pointer-events:none;border:2px dashed var(--dm-accent);border-radius:10px;background:#141210d9;color:var(--dm-accent-strong);font-size:22px;font-weight:700}
 .sheet-filter{display:grid;gap:5px;margin-bottom:8px;font-size:12px}
 .sheet-list .demo-sheet{border-inline-start:3px solid var(--dm-accent)}
+
+:root[data-theme="light"]{
+  color-scheme:light;
+  --dm-bg:#f7f3ee;
+  --dm-surface:#fff;
+  --dm-surface-2:#faf7f3;
+  --dm-surface-3:#eee7e0;
+  --dm-hover:#f3ebe3;
+  --dm-border:#e1d6cb;
+  --dm-border-strong:#c7b7a9;
+  --dm-text:#261d17;
+  --dm-text-2:#514137;
+  --dm-text-3:#69564a;
+  --dm-accent:#c34c0b;
+  --dm-accent-strong:#913403;
+  --dm-accent-soft:#fff0e3;
+  --dm-accent-line:#c85a20;
+}
+.sheet-filter input[type=search]{min-width:0;width:100%;padding:6px 8px;border:1px solid var(--dm-border-strong);border-radius:5px;background:var(--dm-surface);color:var(--dm-text)}
+:root[data-theme="light"] .primary,:root[data-theme="light"] .brand strong{color:#fff}
+:root[data-theme="light"] .error{color:#9d2116}
+:root[data-theme="light"] .file-drop-overlay{background:#fff6ede8}
+:root[data-theme="light"] .primary:hover:not(:disabled){color:#fff}

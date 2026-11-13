@@ -1,4 +1,6 @@
+import { normalizeSheetSearch } from './sheet-labels';
 import { EstimateReview } from './EstimateReview';
+import { ThemeToggle } from './ThemeToggle';
 import { PasscodeGate } from './PasscodeGate';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -74,6 +76,7 @@ function App() {
   const [state,setState]=useState<State>(emptyState);
   const [saved,setSaved]=useState<State>(emptyState);
   const [sheet,setSheet]=useState(0);
+  const [sheetSearch,setSheetSearch]=useState('');
   const [sheetFilter,setSheetFilter]=useState<Scope|'demo'|'all'>('all');
   const [sheetHints,setSheetHints]=useState<Record<number,Scope[]>>({});
   const [dragging,setDragging]=useState(false);
@@ -194,7 +197,7 @@ function App() {
     try {
       let p=await (await request(endpoint,init)).json() as Project;
       if (!p.state) p=await (await request(`/api/projects/${p.id}`)).json();
-      setSheetFilter('all');setSheetHints({});setProject(p);setState(p.state);setSaved(p.state);changeSheet(0);
+      setSheetSearch('');setSheetFilter('all');setSheetHints({});setProject(p);setState(p.state);setSaved(p.state);changeSheet(0);
       setUndo([]);setRedo([]);setZoom(1);setHidden([]);setSavedRevision('');changeMode('select');
       setProjects(await (await request('/api/projects')).json());
     } catch(e) { report(e); }
@@ -357,10 +360,15 @@ function App() {
     }
     return result;
   },[state.items]);
-  const filteredSheets=project?.sheets.map((view,index)=>({view,index})).filter(({view,index})=>
-    sheetMatches(view.name,sheetFilter)||
-    (sheetFilter==='demo' ? (sheetScopes.get(index)?.size??0)>0 || !!sheetHints[index]?.length :
-      sheetFilter!=='all'&&(sheetScopes.get(index)?.has(sheetFilter)||sheetHints[index]?.includes(sheetFilter))))??[];
+  const searchTokens=sheetSearch.trim().split(/\s+/).map(normalizeSheetSearch).filter(Boolean);
+  const filteredSheets=project?.sheets.map((view,index)=>({view,index})).filter(({view,index})=>{
+    const relatedScopes=new Set([...(sheetScopes.get(index)??[]),...(sheetHints[index]??[])]);
+    const scopeNames=[...relatedScopes].map(key=>scopes[key][0]);
+    const searchable=normalizeSheetSearch([view.name,view.planName,...(view.keywords??[]),...scopeNames].join(' '));
+    if(!searchTokens.every(token=>searchable.includes(token)))return false;
+    return sheetMatches(view.name,sheetFilter)||
+      (sheetFilter==='demo'?relatedScopes.size>0:sheetFilter!=='all'&&relatedScopes.has(sheetFilter));
+  })??[];
   return <div className="app" onDragEnter={e=>{
     if(!e.dataTransfer.types.includes('Files'))return;
     e.preventDefault();dragDepth.current++;if(!busy)setDragging(true);
@@ -381,6 +389,7 @@ function App() {
     <header>
       <div className="brand"><strong>A2Z</strong><span>Takeoff Desk</span></div>
       <span className="sandbox-label">LOCAL SANDBOX</span>
+      <ThemeToggle/>
       <div className="project-picker">
         {projects.length>0 && <select aria-label="Open saved project" disabled={!!busy}
           value={project?.id ?? ''} onChange={e=>void open('/api/projects/'+e.target.value)}>
@@ -425,6 +434,13 @@ function App() {
       <main className="workspace">
         <fieldset className="panel sidebar" disabled={!!busy}>
           <h2>Sheets</h2>
+          <label className="sheet-filter">Search sheets
+            <input type="search" value={sheetSearch} placeholder="Sheet number, title, keyword"
+              onChange={e=>setSheetSearch(e.target.value)} onKeyDown={e=>{
+                if(e.key==='Enter'&&filteredSheets.length)changeSheet(filteredSheets[0].index);
+                if(e.key==='Escape')setSheetSearch('');
+              }}/>
+          </label>
           <label className="sheet-filter">Filter sheets
             <select value={sheetFilter} onChange={e=>setSheetFilter(e.target.value as typeof sheetFilter)}>
               <option value="all">All sheets</option><option value="demo">Demolition</option>
@@ -598,5 +614,6 @@ function App() {
   </div>;
 }
 
+try{if(localStorage.getItem('a2z-theme')==='light')document.documentElement.dataset.theme='light';}catch{}
 if(import.meta.env.MODE==='netlify')document.documentElement.dataset.hosted='true';
 createRoot(document.getElementById('root')!).render(import.meta.env.MODE==='netlify' ? <PasscodeGate><App/></PasscodeGate> : <App/>);

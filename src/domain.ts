@@ -25,7 +25,7 @@ export interface State {
   revision: number; items: Item[]; scales: Record<number, Calibration>;
   notes: Record<number, string[]>; rules: Record<number, Rule[]>; markup: number | null;
 }
-export interface Sheet { name: string; width: number; height: number; planName?: string }
+export interface Sheet { name: string; width: number; height: number; planName?: string; keywords?: string[] }
 export interface Project { id: string; name: string; sheets: Sheet[]; state: State }
 export interface Rule { scope: Scope; color: string; dashed: boolean }
 export const deskNames: Record<Scope,string> = {

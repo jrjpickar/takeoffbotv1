@@ -1,3 +1,4 @@
+import { ThemeToggle } from './ThemeToggle';
 import { useEffect, useState, type ReactNode } from 'react';
 import { json, request } from './domain';
 
@@ -14,6 +15,7 @@ export function PasscodeGate({children}:{children:ReactNode}) {
   if(allowed)return children;
   return <div className="app"><main className="empty"><div>
     <h1>A2Z Takeoff Sandbox</h1>
+    <ThemeToggle/>
     <form onSubmit={async e=>{
       e.preventDefault();setChecking(true);setError('');
       try {
