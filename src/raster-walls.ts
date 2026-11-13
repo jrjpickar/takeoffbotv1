@@ -11,13 +11,15 @@ export function wallPairs(rgb:Uint8ClampedArray,width:number,height:number,strid
   for(const vertical of [false,true]){
     const rows=vertical?width:height, columns=vertical?height:width;
     const bands:Band[]=[];
+    let previous:Band[]=[], active:Band[]=[];
     for(let y=0;y<rows;y++){
+      active=[];
       let start=-1,last=-20,count=0;
       const finish=()=>{
         if(last-start<44||count/(last-start+1)<.45)return;
-        const band=bands.findLast(b=>y-b.last<=1&&Math.abs(b.lo-start)<=10&&Math.abs(b.hi-last)<=10);
-        if(band)band.last=y;
-        else bands.push({first:y,last:y,lo:start,hi:last});
+        const band=previous.findLast(b=>Math.abs(b.lo-start)<=10&&Math.abs(b.hi-last)<=10);
+        if(band){band.last=y;active.push(band);}
+        else{const created={first:y,last:y,lo:start,hi:last};bands.push(created);active.push(created);}
       };
       for(let x=0;x<columns;x++){
         if(!red[vertical?x*width+y:y*width+x])continue;
@@ -25,9 +27,10 @@ export function wallPairs(rgb:Uint8ClampedArray,width:number,height:number,strid
         last=x;count++;
       }
       finish();
+      previous=active;
     }
     const candidates:{a:Band;b:Band;lo:number;hi:number;score:number}[]=[];
-    const thick=bands.filter(b=>b.last>b.first);
+    const thick=bands.filter(b=>b.last>b.first).sort((a,b)=>(a.first+a.last)-(b.first+b.last));
     for(let i=0;i<thick.length;i++)for(let j=i+1;j<thick.length;j++){
       const a=thick[i],b=thick[j],gap=(b.first+b.last-a.first-a.last)/2;
       if(gap>32)break;

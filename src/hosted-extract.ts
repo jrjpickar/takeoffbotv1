@@ -1,8 +1,9 @@
 import * as pdf from 'mupdf';
+import { demolitionLegend } from './legend-scope';
 import { wallPairs } from './raster-walls';
 import { distance, measure, scopes, type Calibration, type Item, type Point, type Rule, type Scope, type Sheet } from './domain';
 
-type Stroke = {color:string; dashed:boolean; seq:number; items:[string,Point[]][]; points:Point[];
+type Stroke = {paint:'stroke'|'fill';color:string; dashed:boolean; seq:number; items:[string,Point[]][]; points:Point[];
   closed:boolean; simple:boolean; bounds:pdf.Rect};
 const tag=/^A2Z TAKEOFF:\s*(\w+)(?:\s+THICKNESS=(\d+(?:\.\d+)?)IN)?$/i;
 const legend=/^A2Z LEGEND:\s*(\w+)(?:\s+THICKNESS=(\d+(?:\.\d+)?)IN)?$/i;
@@ -56,10 +57,13 @@ async function extractSheet(id:string,file:Blob,index:number) {
   ];
   const paths:Stroke[]=[];
   const labels:{text:string;bounds:pdf.Rect}[]=[];
-  let rasterCoverage=0;
-  const device=new pdf.Device({
-    strokePath(path,stroke,m,cs,color,alpha){
+  let rasterCoverage=0, strokeId=0, fillId=0;
+  function readPath(path:pdf.Path,m:pdf.Matrix,cs:pdf.ColorSpace,color:number[],alpha:number,
+    paint:Stroke['paint'],dashed:boolean){
       if(alpha<=0) return;
+      const colorRGB=cs.isRGB()?color:cs.isGray()?Array(3).fill(color[0]):null;
+      // Ordinary black and white fills are page backgrounds, not finish swatches.
+      if(paint==='fill'&&(!colorRGB||Math.max(...colorRGB)-Math.min(...colorRGB)<.04))return;
       if(paths.length>=120000) throw new Error('This sheet exceeds the vector processing limit. Trace it manually.');
       let moves=0, closed=false, curved=false;
       const points:Point[]=[], items:Stroke['items']=[];
@@ -73,10 +77,12 @@ async function extractSheet(id:string,file:Blob,index:number) {
       if(!points.length) return;
       const bounds=points.reduce<pdf.Rect>((r,[x,y])=>[Math.min(x,r[0]),Math.min(y,r[1]),Math.max(x,r[2]),Math.max(y,r[3])],
         [Infinity,Infinity,-Infinity,-Infinity]);
-      const colorRGB=cs.isRGB()?color:cs.isGray()?Array(3).fill(color[0]):null;
-      paths.push({seq:paths.length,color:colorRGB?rgb(colorRGB):'',dashed:!!stroke.getDashes()?.length,
+      paths.push({seq:paint==='stroke'?strokeId++:--fillId,paint,color:colorRGB?rgb(colorRGB):'',dashed,
         bounds,items,points,closed,simple:moves===1&&!curved});
-    },
+  }
+  const device=new pdf.Device({
+    strokePath(path,stroke,m,cs,color,alpha){readPath(path,m,cs,color,alpha,'stroke',!!stroke.getDashes()?.length);},
+    fillPath(path,_,m,cs,color,alpha){readPath(path,m,cs,color,alpha,'fill',false);},
   });
   try {
     page.runPageContents(device,pdf.Matrix.identity);
@@ -105,7 +111,7 @@ async function extractSheet(id:string,file:Blob,index:number) {
 }
 export async function vectors(id:string,file:Blob,index:number) {
   const data=await extract(id,file,index);
-  return {paths:data.paths.map(({color,dashed,items})=>({color:color||null,dashed,items}))};
+  return {paths:data.paths.filter(p=>p.paint==='stroke').map(({color,dashed,items})=>({color:color||null,dashed,items}))};
 }
 
 export async function run(id:string,file:Blob,index:number,input:{calibration?:Calibration;rules:Rule[]},
@@ -135,33 +141,45 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
   }
   for(const a of annotations){
     const match=tag.exec(a.text);
-    const scope=match&&scopeOf(match[1]);
+    const scope=match?scopeOf(match[1]):demolitionLegend(a.text);
     const tool=({Line:'line',PolyLine:'polyline',Polygon:'polygon',Circle:'count'} as const)[a.type as 'Line'];
-    if(scope&&tool)emit(scope,tool,a.points,`Tagged annotation xref ${a.xref}`,`a${a.xref}`,Number(match[2])||null);
+    if(scope&&tool)emit(scope,tool,a.points,`Tagged annotation xref ${a.xref}`,`a${a.xref}`,Number(match?.[2])||null);
     else if(/^A2Z TAKEOFF:/i.test(a.text))warnings.push(`Annotation xref ${a.xref}: unsupported geometry or scope tag.`);
   }
   const styles=new Map<string,Map<string,{scope:Scope;thickness:number|null}>>();
   const swatches=new Set<number>();
-  const map=(color:string,dashed:boolean,scope:Scope,thickness:number|null)=>{
-    const key=`${color.toLowerCase()}/${dashed}`;
+  const map=(color:string,dashed:boolean,scope:Scope,thickness:number|null,paint:Stroke['paint']='stroke')=>{
+    const key=`${paint}/${color.toLowerCase()}/${dashed}`;
     const matches=styles.get(key)??new Map();
     matches.set(`${scope}/${thickness}`,{scope,thickness});
     styles.set(key,matches);
   };
   for(const rule of input.rules)map(rule.color,rule.dashed,rule.scope,null);
+  const namedLegend=labels.filter(label=>/^(?:DEMOLITION|DEMO) LEGENDS?$/i.test(label.text.trim()));
   for(const label of labels){
     const match=legend.exec(label.text);
-    const scope=match&&scopeOf(match[1]);
+    const scope=match?scopeOf(match[1]):demolitionLegend(label.text);
     if(!scope)continue;
+    if(!match&&raster&&scope==='wall')continue;
     const [left,top,,bottom]=label.bounds;
-    const options=paths.filter(p=>p.color&&left-p.bounds[2]>=0&&left-p.bounds[2]<=36&&
-      (p.bounds[1]+p.bounds[3])/2>=top&&(p.bounds[1]+p.bounds[3])/2<=bottom);
+    // Ordinary notes are only considered in a demolition legend column.
+    if(!match&&!namedLegend.some(heading=>top>=heading.bounds[3]&&top-heading.bounds[3]<=260&&
+      left>=heading.bounds[0]-20&&left<=heading.bounds[2]+150))continue;
+    const options=paths.filter(p=>{
+      const [x,y,r,b]=p.bounds;
+      const gap=left-r, middle=(y+b)/2;
+      if(!p.color||gap<0||gap>(match?36:110)||middle<top-3||middle>bottom+3)return false;
+      if(match)return true;
+      return p.simple&&(r-x>=5||b-y>=5)&&r-x<=120&&b-y<=42;
+    });
     for(const option of options)swatches.add(option.seq);
-    if(options.length===1)map(options[0].color,options[0].dashed,scope,Number(match[2])||null);
-    else warnings.push(`Legend swatch ambiguous or absent for ${label.text}.`);
+    if(options.length===1){
+      const p=options[0];
+      map(p.color,p.dashed,scope,Number(match?.[2])||null,p.paint);
+    }else if(match||options.length)warnings.push(`Legend swatch ambiguous or absent for ${label.text}.`);
   }
   for(const path of paths){
-    const rules=styles.get(`${path.color}/${path.dashed}`);
+    const rules=styles.get(`${path.paint}/${path.color}/${path.dashed}`);
     if(!rules||swatches.has(path.seq))continue;
     const source=`Style rule ${path.color} ${path.dashed?'dashed':'solid'}, vector ${path.seq}`;
     if(rules.size!==1){warnings.push(`${source}: competing rules.`);continue;}
@@ -171,12 +189,12 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     const closed=path.closed||returns;
     if(returns)pts.pop();
     const unit=scopes[scope][1];
-    if(path.simple&&unit==='LF'&&!closed&&pts.length>=2)emit(scope,pts.length===2?'line':'polyline',pts,source,`v${path.seq}`,thickness);
-    else if(path.simple&&unit==='SF'&&closed&&pts.length>=3)emit(scope,'polygon',pts,source,`v${path.seq}`,thickness);
+    if(path.simple&&unit==='LF'&&!closed&&pts.length>=2)emit(scope,pts.length===2?'line':'polyline',pts,source,`${path.paint==='fill'?'f':'v'}${Math.abs(path.seq)}`,thickness);
+    else if(path.simple&&unit==='SF'&&closed&&pts.length>=3)emit(scope,'polygon',pts,source,`${path.paint==='fill'?'f':'v'}${Math.abs(path.seq)}`,thickness);
     else if(path.simple&&unit==='EA'&&closed&&pts.length===4&&pts.every(([x,y])=>
       (x===path.bounds[0]||x===path.bounds[2])&&(y===path.bounds[1]||y===path.bounds[3]))){
       const [l,t,r,b]=path.bounds;
-      emit(scope,'count',[[(l+r)/2,(t+b)/2]],source,`v${path.seq}`,thickness);
+      emit(scope,'count',[[(l+r)/2,(t+b)/2]],source,`${path.paint==='fill'?'f':'v'}${Math.abs(path.seq)}`,thickness);
     } else warnings.push(`${source}: unsupported geometry for ${scope}.`);
   }
   const wallLegend=labels.find(label=>/^WALL(?:S)?\s+TO\s+BE\s+(?:DEMO(?:LISHED)?|REMOVED)\.?$/i.test(label.text));

@@ -55,3 +55,7 @@ The hosted Chromium test imported the supplied 44-sheet ZIP, ignored macOS metad
 ## Faster runs and interactive review
 
 The browser paints available measurement batches on animation frames without an artificial pause per item. The worker reuses the last three extracted sheets and raster wall results for the active PDF. Repricing skips color-only changes. No before-and-after runtime benchmark was collected. The current Desk attachment's decision and Auto Estimate runner sources match the sandbox copies. Chromium verified eight distinct item colors, an item override with approval retained, crew repricing from $5,635 to $9,315, answer reset, and scope exclusion and restoration. The Pine Street plan remains private and is excluded from this update.
+
+## Consistent colors and expanded detection
+
+The hosted regression uses an ordinary vector demolition legend with filled and stroked swatches. It verifies two same-color door counts, 14 SF each of flooring and ceiling, and 10 LF of sawcutting. It verifies that an unbound fixture note creates no takeoff and reruns do not duplicate quantities. The Pine Street test covers the original 26 editable raster wall candidates. Raster doors, fixtures, and finish areas without bound geometry still need review and manual takeoff. No STACK comparison or before-and-after speed benchmark was performed.

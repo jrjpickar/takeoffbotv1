@@ -22,10 +22,9 @@ const changeScale = (s: State, sheet: number, scale: Calibration): State => ({
 });
 type Extraction = {paths: {color: string | null; dashed: boolean;
   items: [string,Point[]][]}[]};
-const itemPalette=['#c2410c','#1e68c9','#16714b','#8053c5','#a16b00','#b22c82','#007b84','#755334'];
 const emptyState: State = {revision:0,items:[],scales:{},notes:{},rules:{},markup:null};
 
-async function stream(url: string, body: unknown, handle: (kind: string, data: unknown) => Promise<void>) {
+async function stream(url: string, body: unknown, handle: (kind: string, data: unknown) => void) {
   const response = await request(url,json(body));
   if (!response.body) throw new Error('Live response is unavailable.');
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -44,7 +43,7 @@ async function stream(url: string, body: unknown, handle: (kind: string, data: u
         const data=JSON.parse(lines[1].slice(6));
         if (kind==='done') complete=true;
         if (kind==='failed') throw new Error(data.message);
-        await handle(kind,data);
+        handle(kind,data);
       }
     }
     if (!complete) throw new Error('The takeoff stream ended early. Review any results received.');
@@ -67,7 +66,7 @@ function App() {
   const [pending,setPending]=useState<Point[]>([]);
   const [feet,setFeet]=useState('');
   const [colorPrompt,setColorPrompt]=useState(false);
-  const [runColor,setRunColor]=useState('#c2410c');
+  const [runColors,setRunColors]=useState<State['colors']>({});
   const [reviewOnly,setReviewOnly]=useState(false);
   const [selected,setSelected]=useState<string>();
   const [undo,setUndo]=useState<State[]>([]);
@@ -110,7 +109,7 @@ function App() {
     if (!root) return;
     const ctl=new AbortController();
     request(`${root}/sheets/${sheet}/vectors`,{signal:ctl.signal}).then(r=>r.json())
-      .then(setExtraction).catch(e=>{if(!ctl.signal.aborted) report(e);});
+      .then(result=>{if(!ctl.signal.aborted)setExtraction(result);}).catch(e=>{if(!ctl.signal.aborted) report(e);});
     return ()=>ctl.abort();
   },[root,sheet]);
   const pricingInput=JSON.stringify({
@@ -232,10 +231,11 @@ function App() {
     } catch(e) {report(e);}
     finally {setBusy('');}
   }
-  async function run(colorMode:'scope'|'single'|'items'='scope') {
+  async function run(applyColors=false) {
     setColorPrompt(false);
     setBusy('Processing sheet…');setError('');setNotice('');setPending([]);setMode('select');
     setUndo(prev=>[...prev.slice(-49),state]);setRedo([]);
+    if(applyColors)setState(prev=>({...prev,colors:{...prev.colors,...runColors}}));
     const ids=new Set(state.items.map(i=>i.id));
     const geometryKey=(i:Item)=>JSON.stringify([i.sheet,i.scope,i.points.map(p=>p.map(v=>Math.round(v*10000))).sort()]);
     const existingGeometry=new Set(state.items.map(geometryKey));
@@ -252,16 +252,17 @@ function App() {
       setHidden(prev=>prev.filter(scope=>!visibleScopes.has(scope)));
     };
     try {
-      await stream(`${root}/sheets/${sheet}/run`,{calibration:cal,rules},async (kind,data)=>{
+      await stream(`${root}/sheets/${sheet}/run`,{calibration:cal,rules},(kind,data)=>{
         if (kind==='scale') setState(prev=>changeScale(prev,sheet,data as Calibration));
-        if (kind==='measurement') {
-          const candidate=data as Item;
-          const key=geometryKey(candidate);
-          if (ids.has(candidate.id) || existingGeometry.has(key)) {skipped++;return;}
-          ids.add(candidate.id);existingGeometry.add(key);added++;
-          const color=colorMode==='single'?runColor:colorMode==='items'?itemPalette[(added-1)%itemPalette.length]:undefined;
-          batch.push(color?{...candidate,color}:candidate);
-          if(frame===undefined)frame=requestAnimationFrame(flush);
+        if(kind==='measurement'||kind==='measurements'){
+          const candidates=kind==='measurements'?data as Item[]:[data as Item];
+          for(const candidate of candidates){
+            const key=geometryKey(candidate);
+            if(ids.has(candidate.id)||existingGeometry.has(key)){skipped++;continue;}
+            ids.add(candidate.id);existingGeometry.add(key);added++;
+            batch.push(candidate);
+          }
+          if(batch.length&&frame===undefined)frame=requestAnimationFrame(flush);
         }
         if (kind==='warnings') setState(prev=>({...prev,notes:{...prev.notes,[sheet]:data as string[]}}));
       });
@@ -328,7 +329,7 @@ function App() {
         <label className="inline"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/> Snap</label>
         <div className="toolbar-end">
           <button onClick={()=>void run()}>Run sheet takeoff</button>
-          <button aria-expanded={colorPrompt} onClick={()=>setColorPrompt(!colorPrompt)}>Run colors…</button>
+          <button aria-expanded={colorPrompt} onClick={()=>{setRunColors({...state.colors});setColorPrompt(!colorPrompt);}}>Run colors…</button>
           <button disabled={!localItems.length} onClick={()=>{
             if(!window.confirm(`Clear ${localItems.length} takeoffs from this sheet? You can undo this.`))return;
             commit({...state,items:state.items.filter(item=>item.sheet!==sheet),notes:{...state.notes,[sheet]:[]}});
@@ -338,10 +339,10 @@ function App() {
         </div>
       </fieldset>
       {colorPrompt&&<div className="run-colors" role="group" aria-label="Optional takeoff colors">
-        <button onClick={()=>void run()}>Use scope colors</button>
-        <button onClick={()=>void run('items')}>Rotate colors by item</button>
-        <label className="inline">Single color <input aria-label="Run color" type="color" value={runColor} onChange={e=>setRunColor(e.target.value)}/></label>
-        <button onClick={()=>void run('single')}>Run with this color</button>
+        {scopeKeys.map(key=><label className="inline" key={key}>{scopes[key][0]} <input type="color"
+          aria-label={`Run color for ${scopes[key][0]}`} value={scopeColor(key,runColors)}
+          onChange={e=>setRunColors(prev=>({...prev,[key]:e.target.value}))}/></label>)}
+        <button onClick={()=>void run(true)}>Apply colors and run</button>
         <button onClick={()=>setColorPrompt(false)}>Cancel</button>
       </div>}
       <main className="workspace">
@@ -426,7 +427,7 @@ function App() {
               const m=measure(i,cal);
               return <button key={i.id} className={i.id===selected?'active':''} onClick={()=>{
                 setSelected(i.id);setHidden(hidden.filter(s=>s!==i.scope));changeMode('select');
-              }}><i style={{background:i.color??scopeColor(i.scope,state.colors)}}/><span>{scopes[i.scope][0]}
+              }}><i style={{background:scopeColor(i.scope,state.colors)}}/><span>{scopes[i.scope][0]}
                 <small>{i.status} · {i.edited?'edited':i.source.startsWith('Manual')?'manual':'rule match'}</small>
               </span><b>{m?`${quantity(m.value)} ${m.unit}`:'—'}</b></button>;
             })}
@@ -435,9 +436,8 @@ function App() {
             <h3>Selected measurement</h3>
             <small>{project.sheets[sheet].name} · {item.source}{item.edited?' · Edited':''}</small>
             {linkedScope && item.status==='approved' && <p>Desk scope · {linkedScope.text}</p>}
-            <label>Item color <input type="color" value={item.color??scopeColor(item.scope,state.colors)}
-              onChange={e=>edit({...item,color:e.target.value})}/></label>
-            {item.color&&<button onClick={()=>edit({...item,color:undefined})}>Use scope color</button>}
+            <label>{scopes[item.scope][0]} color <input type="color" value={scopeColor(item.scope,state.colors)}
+              onChange={e=>commit({...state,colors:{...state.colors,[item.scope]:e.target.value}})}/></label>
             <label>Assigned scope <select value={item.scope} onChange={e=>{
               const target=e.target.value as Scope;
               edit({...item,scope:target,status:'review',edited:true,thickness:target==='slab'?item.thickness:null});

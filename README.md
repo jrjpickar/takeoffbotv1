@@ -64,4 +64,12 @@ Stop any local app server on port 8765 before the browser tests. They start an i
 
 Run `npm run build:netlify` and `npm test -- --config=playwright.netlify.config.ts` after installing Chromium for Playwright. The suite serves the static build and invokes the same pricing handler that ships to Netlify. The hosted target uses MuPDF WebAssembly to extract annotated geometry and styled vector strokes. It also proposes straight wall centerlines on raster-backed demolition floor plans when a red hatch swatch is paired with a recognized wall demolition legend. The raster rule is tuned to the Pine Street layout and can miss edges, diagonals, short walls, or interrupted lines. Verify and edit each candidate before approval. The hosted workspace reuses the Desk pricing adapter server-side.
 
-**Run colors…** optionally applies a single color or rotates through eight colors across new items. Each selected measurement also has its own color override. **Next review** selects the next measurable item pending review. The estimate panel uses the Desk's decision engine. Use its answers and crew or load inputs to reprice, or exclude and restore scope lines. Save the project to retain answers and colors. Excluding an estimate line does not remove the approved takeoff geometry from the quantity CSV.
+**Next review** selects the next measurable item pending review. The estimate panel uses the Desk's decision engine. Use its answers and crew or load inputs to reprice, or exclude and restore scope lines. Save the project to retain answers and colors. Excluding an estimate line does not remove the approved takeoff geometry from the quantity CSV.
+
+### Scope colors and standard legends
+
+**Run colors…** lets you set one color per scope before starting. Every takeoff in that scope uses the project’s color across sheets, including takeoffs saved before this update. Changing a scope color leaves approvals and quantities intact.
+
+The hosted engine reads exact demolition labels beside a distinct vector swatch under a **Demolition Legend** heading. It supports wall and sawcut lines, closed flooring, ceiling and slab regions, rectangular door and fixture markers, and millwork lines. Tagged and explicit markup rules still work. The engine keeps conflicting styles, unsupported symbols and unbound plan notes out of automated quantities. Door and fixture detection requires a bound marker or annotation. The Pine Street raster layout still produces wall candidates only.
+
+Worker results cross to the UI in batches of up to 32. The raster scan compares each run against bands from the preceding scanline. Repeat runs reuse extracted geometry for cached sheets.

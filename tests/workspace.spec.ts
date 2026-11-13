@@ -30,7 +30,8 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true');
 
   await page.getByRole('button',{name:'Run colors…'}).click();
-  await page.getByRole('button',{name:'Rotate colors by item'}).click();
+  await page.getByLabel('Run color for Interior walls').fill('#0055ff');
+  await page.getByRole('button',{name:'Apply colors and run'}).click();
   await expect(page.locator('.measurements button')).toHaveCount(8);
   await expect(page.getByRole('status')).toHaveText('8 added for review.');
   await expect(page.getByText('8 in review')).toBeVisible();
@@ -51,8 +52,8 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await page.getByRole('button',{name:'Approve',exact:true}).click();
   await expect(page.getByText('1 approved',{exact:true})).toBeVisible();
   await expect(page.locator('.bid')).toContainText('$5,635.00');
-  await page.getByLabel('Item color').fill('#0055ff');
-  await expect(page.locator('.measurements button.active i')).toHaveCSS('background-color','rgb(0, 85, 255)');
+  await page.getByLabel('Interior walls color',{exact:true}).fill('#0066aa');
+  await expect(page.locator('.measurements button.active i')).toHaveCSS('background-color','rgb(0, 102, 170)');
   await expect(page.getByText('1 approved',{exact:true})).toBeVisible();
   const questions=page.locator('.review-question');
   await questions.filter({has:page.getByLabel('Workers',{exact:true})}).first().getByLabel('Days',{exact:true}).fill('2');
@@ -172,4 +173,28 @@ test('draw remaining tools and move a count on the original plan',async({page})=
   const x=result.state.items.find((item:{scope:string})=>item.scope==='door').points[0][0];
   expect(x).toBeGreaterThan(249);
   expect(x).toBeLessThan(251);
+});
+
+test('standard legend finds non-wall geometry and keeps identical types the same color',async({page})=>{
+  await page.goto('/');
+  test.skip(!(await page.locator('html[data-hosted]').count()),'Hosted PDF engine coverage');
+  await page.getByLabel('Passcode').fill('local-browser-test-only');
+  await page.getByRole('button',{name:'Unlock'}).click();
+  await page.getByTestId('upload').setInputFiles('tests/demolition-legend.pdf');
+  await page.getByRole('button',{name:'Run colors…'}).click();
+  await page.getByLabel('Run color for Doors').fill('#0055ff');
+  await page.getByRole('button',{name:'Apply colors and run'}).click();
+  await expect(page.getByRole('status')).toHaveText('5 added for review.');
+  const doors=page.locator('.measurements button').filter({hasText:'Doors'});
+  await expect(doors).toHaveCount(2);
+  for(const row of await doors.all()){
+    await expect(row).toContainText('1 EA');
+    await expect(row.locator('i')).toHaveCSS('background-color','rgb(0, 85, 255)');
+  }
+  await expect(page.locator('.measurements')).toContainText(/Flooring.*14 SF/);
+  await expect(page.locator('.measurements')).toContainText(/Ceilings.*14 SF/);
+  await expect(page.locator('.measurements')).toContainText(/Sawcutting.*10 LF/);
+  await expect(page.locator('.measurements')).not.toContainText('Fixtures');
+  await page.getByRole('button',{name:'Run sheet takeoff'}).click();
+  await expect(page.getByRole('status')).toHaveText('0 added for review, 5 already present.');
 });
