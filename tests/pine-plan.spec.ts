@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import {test,expect} from '@playwright/test';
 
 const fixture=process.env.A2Z_PINE_ZIP;
@@ -9,7 +10,7 @@ test('Pine ZIP imports and produces wall candidates',async({page})=>{
   await page.getByRole('button',{name:'Unlock'}).click();
   await page.getByTestId('upload').setInputFiles(fixture!);
   await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(44,{timeout:60000});
-  await page.getByRole('button',{name:/^Sheet 10\b/}).click();
+  await page.getByRole('button',{name:/^A-1\.01\b/}).click();
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true',{timeout:30000});
   await page.getByRole('button',{name:'Calibrate',exact:true}).click();
   const paper=await page.getByTestId('paper').boundingBox();
@@ -41,7 +42,7 @@ test('Pine ZIP imports and produces wall candidates',async({page})=>{
   await expect(page.getByRole('status')).toHaveText('Saved revision 1.');
   await page.reload();
   await page.getByRole('combobox',{name:'Open saved project'}).selectOption({label:'10932_PINE_ST_LOS_ALAMITOSV08082026V01_1.pdf'});
-  await page.getByRole('button',{name:/^Sheet 10\b/}).click();
+  await page.getByRole('button',{name:/^A-1\.01\b/}).click();
   await expect(rows.first().locator('i')).toHaveCSS('background-color','rgb(0, 85, 255)');
   const viewer=page.getByTestId('viewer');
   await viewer.hover();
@@ -70,9 +71,9 @@ test('Pine ceiling hatch and switching scopes',async({page})=>{
   const filter=page.getByLabel('Filter sheets');
   await filter.selectOption('demo');
   await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(2);
-  await expect(page.getByRole('button',{name:/^Sheet 10\b/})).toHaveClass(/demo-sheet/);
+  await expect(page.getByRole('button',{name:/^A-1\.01\b/})).toHaveClass(/demo-sheet/);
   await filter.selectOption('ceiling');
-  await page.getByRole('button',{name:/^Sheet 13\b/}).click();
+  await page.getByRole('button',{name:/^A-1\.04\b/}).click();
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true',{timeout:30000});
   await page.getByRole('button',{name:'Run all sheets'}).click();
   await expect(page.getByRole('status')).toHaveText('Scanned 44 sheets: 2 matched, 32 added for review, 0 already present.',{timeout:60000});
@@ -81,6 +82,13 @@ test('Pine ceiling hatch and switching scopes',async({page})=>{
   await expect(rows.first()).toContainText('Ceilings');
   await expect(page.locator('.scale-status')).toContainText('Printed scale: 3/16');
   for(const row of await rows.all())await expect(row).toContainText(/\d+(?:\.\d+)? SF/);
+  const exported=page.waitForEvent('download');
+  await page.getByRole('button',{name:'Export all takeoffs'}).click();
+  const csv=readFileSync((await (await exported).path())!,'utf8');
+  expect(csv.trim().split(/\r?\n/)).toHaveLength(33);
+  expect(csv).toContain('A-1.01 - DEMOLITION PLAN,10,Interior walls,In review');
+  expect(csv).toContain('A-1.04 - EXISTING REFLECTED CEILING PLAN,13,Ceilings,In review');
+
   await page.getByRole('button',{name:'Ceilings SF',exact:true}).click();
   await expect(page.getByRole('button',{name:'Polygon',exact:true})).toHaveAttribute('aria-pressed','true');
   await page.getByRole('button',{name:'Doors EA',exact:true}).click();

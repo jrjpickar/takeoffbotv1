@@ -1,4 +1,5 @@
-import { normalizeSheetSearch } from './sheet-labels';
+import { planSetCsv } from './plan-export';
+import { displaySheetName, normalizeSheetSearch } from './sheet-labels';
 import { EstimateReview } from './EstimateReview';
 import { ThemeToggle } from './ThemeToggle';
 import { PasscodeGate } from './PasscodeGate';
@@ -323,14 +324,22 @@ function App() {
     } catch(e) {report(e);}
     finally {flush();setBusy('');}
   }
+  function download(blob:Blob,name:string) {
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    link.href=url;link.download=name;link.click();
+    window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
   async function exportCsv() {
     try {
-      const blob=await (await request(root+'/csv',json(state))).blob();
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      a.href=url;a.download='A2Z-STACK-takeoff.csv';a.click();
-      window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+      download(await (await request(root+'/csv',json(state))).blob(),'A2Z-STACK-takeoff.csv');
     } catch(e) {report(e);}
+  }
+  function exportPlanSet(){
+    if(!project)return;
+    const name=project.name.replace(/\.pdf$/i,'').replace(/[^a-z0-9._-]+/gi,'-');
+    download(new Blob([planSetCsv(project,state)],{type:'text/csv;charset=utf-8'}),
+      `${name||'A2Z'}-all-takeoffs.csv`);
   }
   async function restore() {
     const revision=Number(savedRevision);
@@ -364,9 +373,9 @@ function App() {
   const filteredSheets=project?.sheets.map((view,index)=>({view,index})).filter(({view,index})=>{
     const relatedScopes=new Set([...(sheetScopes.get(index)??[]),...(sheetHints[index]??[])]);
     const scopeNames=[...relatedScopes].map(key=>scopes[key][0]);
-    const searchable=normalizeSheetSearch([view.name,view.planName,...(view.keywords??[]),...scopeNames].join(' '));
+    const searchable=normalizeSheetSearch([displaySheetName(view.name),view.name,view.planName,...(view.keywords??[]),...scopeNames].join(' '));
     if(!searchTokens.every(token=>searchable.includes(token)))return false;
-    return sheetMatches(view.name,sheetFilter)||
+    return sheetMatches(displaySheetName(view.name),sheetFilter)||
       (sheetFilter==='demo'?relatedScopes.size>0:sheetFilter!=='all'&&relatedScopes.has(sheetFilter));
   })??[];
   return <div className="app" onDragEnter={e=>{
@@ -421,6 +430,7 @@ function App() {
             commit({...state,items:state.items.filter(item=>item.sheet!==sheet),notes:{...state.notes,[sheet]:[]}});
             setSelected(undefined);setPending([]);setNotice('Sheet takeoffs cleared. Calibration kept.');
           }}>Clear sheet takeoffs</button>
+          <button disabled={!state.items.length} onClick={exportPlanSet}>Export all takeoffs</button>
           <button className="primary" onClick={()=>void save()}>Save</button>
         </div>
       </fieldset>
@@ -448,8 +458,8 @@ function App() {
             </select>
           </label>
           <nav className="sheet-list" aria-label="Sheets">
-            {filteredSheets.map(({view:s,index:i})=><button key={i} className={`${i===sheet?'active':''} ${sheetMatches(s.name,'demo')?'demo-sheet':''}`} onClick={()=>changeSheet(i)}>
-              <span>{s.name}</span><small>{state.scales[i]?'Calibrated':'Uncalibrated'}{state.notes[i]?' · Scanned':''}{sheetMatches(s.name,'demo')?' · Demo':''}</small>
+            {filteredSheets.map(({view:s,index:i})=><button key={i} className={`${i===sheet?'active':''} ${sheetMatches(displaySheetName(s.name),'demo')?'demo-sheet':''}`} onClick={()=>changeSheet(i)}>
+              <span>{displaySheetName(s.name)}</span><small>{state.scales[i]?'Calibrated':'Uncalibrated'}{state.notes[i]?' · Scanned':''}{sheetMatches(displaySheetName(s.name),'demo')?' · Demo':''}</small>
             </button>)}
             {!filteredSheets.length&&<p>No matching sheets.</p>}
           </nav>
@@ -486,7 +496,7 @@ function App() {
         </fieldset>
         <section className="drawing-panel">
           <div className="sheet-bar">
-            <div><strong>{project.sheets[sheet].name}</strong><small>{instruction} · Scroll to zoom · Space + drag to pan</small></div>
+            <div><strong>{displaySheetName(project.sheets[sheet].name)}</strong><small>{instruction} · Scroll to zoom · Space + drag to pan</small></div>
             <div className="inline">
               <button aria-label="Zoom out" onClick={()=>setZoom(v=>Math.max(.35,v/1.25))}>−</button>
               <button onClick={()=>setZoom(1)} title="Fit width">{Math.round(zoom*100)}%</button>
@@ -523,18 +533,28 @@ function App() {
           </div>
           <div className="measurements">
             {localItems.length===0 && <p>Trace a scope or run sheet takeoff.</p>}
-            {localItems.filter(i=>!reviewOnly||i.status==='review').map(i=>{
-              const m=measure(i,cal);
-              return <button key={i.id} className={i.id===selected?'active':''} onClick={()=>{
+            {scopeKeys.map(key=>{
+              const items=localItems.filter(i=>i.scope===key&&(!reviewOnly||i.status==='review'));
+              if(!items.length)return null;
+              const values=items.map(i=>({item:i,measurement:measure(i,cal)}));
+              const total=values.reduce((sum,{item,measurement})=>
+                sum+(item.status==='rejected'?0:measurement?.value??0),0);
+              return <details key={key} open className="measurement-group">
+                <summary><i style={{background:scopeColor(key,state.colors)}}/> {scopes[key][0]} · {items.length}
+                  {total>0&&<b>{quantity(total)} {scopes[key][1]}</b>}</summary>
+                <div className="measurement-group-items">{values.map(({item:i,measurement:m})=>
+                  <button key={i.id} className={i.id===selected?'active':''} onClick={()=>{
                 setSelected(i.id);setHidden(hidden.filter(s=>s!==i.scope));changeMode('select');
               }}><i style={{background:scopeColor(i.scope,state.colors)}}/><span>{scopes[i.scope][0]}
                 <small>{i.status} · {i.edited?'edited':i.source.startsWith('Manual')?'manual':'rule match'}</small>
-              </span><b>{m?`${quantity(m.value)} ${m.unit}`:'—'}</b></button>;
+              </span><b>{m?`${quantity(m.value)} ${m.unit}`:'—'}</b></button>
+                )}</div>
+              </details>;
             })}
           </div>
           {item && <section className="selection">
             <h3>Selected measurement</h3>
-            <small>{project.sheets[sheet].name} · {item.source}{item.edited?' · Edited':''}</small>
+            <small>{displaySheetName(project.sheets[sheet].name)} · {item.source}{item.edited?' · Edited':''}</small>
             {linkedScope && item.status==='approved' && <p>Desk scope · {linkedScope.text}</p>}
             <label>{scopes[item.scope][0]} color <input type="color" value={scopeColor(item.scope,state.colors)}
               onChange={e=>commit({...state,colors:{...state.colors,[item.scope]:e.target.value}})}/></label>

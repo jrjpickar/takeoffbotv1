@@ -87,3 +87,11 @@ Drop one local PDF or ZIP onto the workspace. ZIP files use the hosted browser i
 The hosted detector automatically sets the sheet scale from a single supported architectural scale caption next to a plan title, or from one tagged scale bar. It displays the source and preserves a scale already set on the sheet, including manual calibration. Multiple scale captions, unsupported scale notation, and missing captions require manual calibration. Check detected scales against a known dimension when working with resized or reprinted PDFs.
 
 **Search sheets** matches sheet numbers, names, and recognized keywords alongside the scope filter. Press Enter to open the first match or Escape to clear the search. The hosted viewer uses PDF page labels when available and short text-layer keywords as a fallback. Image-only sheets without labels retain their page numbers. Use **Light mode** or **Dark mode** to switch the GHL-inspired palette. The browser remembers your choice.
+
+The takeoff review list groups measurements by scope on the active sheet. Expand or collapse each group to review its items. Group quantities include measurable approved and in-review items currently shown by the review filter. Rejected items remain visible for audit and are excluded from the group total.
+
+**Export all takeoffs** downloads a CSV of every measurement in the open PDF across all sheets and statuses. It includes the sheet name, PDF page, scope, status, units, measurement ID, and scale source. Unmeasurable quantities remain blank. **Download STACK CSV** remains the approved-quantity export.
+
+### Tustin-style demolition drawings
+
+The hosted engine can match a paired dashed **Existing construction to be removed** legend. It uses the legend's stroke color, weight, dash spacing and parallel separation to propose partition centerlines. Review the candidates against the drawing, especially around openings and short segments. The rule does not quantify doors, floor finishes, ceilings or note-only removals on this drawing. Encoded PDF page labels are decoded before display and search.

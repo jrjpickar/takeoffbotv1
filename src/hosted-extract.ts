@@ -1,4 +1,5 @@
-import { sheetIdentity } from './sheet-labels';
+import { dashedPartitions } from './dashed-partitions';
+import { decodeSheetLabel, sheetIdentity } from './sheet-labels';
 import { printedScale } from './sheet-scale';
 import * as pdf from 'mupdf';
 import { hatchAreas } from './hatch-areas';
@@ -6,7 +7,7 @@ import { demolitionLegend } from './legend-scope';
 import { wallPairs } from './raster-walls';
 import { distance, measure, scopes, type Calibration, type Item, type Point, type Rule, type Scope, type Sheet } from './domain';
 
-type Stroke = {paint:'stroke'|'fill';color:string; dashed:boolean; seq:number; items:[string,Point[]][]; points:Point[];
+type Stroke = {width:number;paint:'stroke'|'fill';color:string; dashed:boolean; seq:number; items:[string,Point[]][]; points:Point[];
   closed:boolean; simple:boolean; bounds:pdf.Rect};
 const tag=/^A2Z TAKEOFF:\s*(\w+)(?:\s+THICKNESS=(\d+(?:\.\d+)?)IN)?$/i;
 const legend=/^A2Z LEGEND:\s*(\w+)(?:\s+THICKNESS=(\d+(?:\.\d+)?)IN)?$/i;
@@ -26,7 +27,7 @@ async function document(id:string, file:Blob) {
 }
 function sheetInfo(page:pdf.Page,index:number):Sheet {
   const [x0,y0,x1,y1]=page.getBounds('CropBox');
-  const label=page.getLabel();
+  const label=decodeSheetLabel(page.getLabel());
   let identity=sheetIdentity(label,[]);
   if(!identity.title){
     const text=page.toStructuredText('');
@@ -67,7 +68,7 @@ async function extractSheet(id:string,file:Blob,index:number) {
   const labels:{text:string;bounds:pdf.Rect}[]=[];
   let rasterCoverage=0, strokeId=0, fillId=0;
   function readPath(path:pdf.Path,m:pdf.Matrix,cs:pdf.ColorSpace,color:number[],alpha:number,
-    paint:Stroke['paint'],dashed:boolean){
+    paint:Stroke['paint'],dashed:boolean,width=0){
       if(alpha<=0) return;
       const colorRGB=cs.isRGB()?color:cs.isGray()?Array(3).fill(color[0]):null;
       // Ordinary black and white fills are page backgrounds, not finish swatches.
@@ -85,11 +86,11 @@ async function extractSheet(id:string,file:Blob,index:number) {
       if(!points.length) return;
       const bounds=points.reduce<pdf.Rect>((r,[x,y])=>[Math.min(x,r[0]),Math.min(y,r[1]),Math.max(x,r[2]),Math.max(y,r[3])],
         [Infinity,Infinity,-Infinity,-Infinity]);
-      paths.push({seq:paint==='stroke'?strokeId++:--fillId,paint,color:colorRGB?rgb(colorRGB):'',dashed,
+      paths.push({seq:paint==='stroke'?strokeId++:--fillId,paint,width:Math.round(width*100)/100,color:colorRGB?rgb(colorRGB):'',dashed,
         bounds,items,points,closed,simple:moves===1&&!curved});
   }
   const device=new pdf.Device({
-    strokePath(path,stroke,m,cs,color,alpha){readPath(path,m,cs,color,alpha,'stroke',!!stroke.getDashes()?.length);},
+    strokePath(path,stroke,m,cs,color,alpha){readPath(path,m,cs,color,alpha,'stroke',!!stroke.getDashes()?.length,stroke.getLineWidth()*Math.hypot(m[0],m[1]));},
     fillPath(path,_,m,cs,color,alpha){readPath(path,m,cs,color,alpha,'fill',false);},
   });
   try {
@@ -219,6 +220,14 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
       const [l,t,r,b]=path.bounds;
       emit(scope,'count',[[(l+r)/2,(t+b)/2]],source,`${path.paint==='fill'?'f':'v'}${Math.abs(path.seq)}`,thickness);
     } else warnings.push(`${source}: unsupported geometry for ${scope}.`);
+  }
+  const dashedLegend=labels.find(l=>/^EXISTING CONSTRUCTION TO BE REMOVED$/i.test(l.text));
+  if(dashedLegend&&labels.some(l=>/^DEMO(?:LITION)? LEGEND$/i.test(l.text))&&
+    !input.rules.some(rule=>rule.scope==='wall')){
+    const partitions=dashedPartitions(paths,dashedLegend.bounds);
+    for(const [i,points] of partitions.entries())emit('wall','line',points,
+      'Paired dashed removal outlines · verify partition and endpoints',`d${i}`,null);
+    if(partitions.length)warnings.push('Dashed partition lengths are review candidates. Verify endpoints, doors, finishes, and note-based removals separately.');
   }
   const hatchScopes = new Map<Scope,typeof labels[number]>();
   for(const label of labels){

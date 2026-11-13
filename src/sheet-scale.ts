@@ -10,7 +10,7 @@ export function printedScale(labels:Label[],width:number,height:number):Calibrat
   const possible=labels.filter(({text})=>/^(?:scale\s*:?\s*)?\d.*(?:=|^\d+\s*:\s*\d+$)/i.test(clean(text)));
   if(possible.length!==1)return;
   const label=possible[0], text=clean(label.text), match=printed.exec(text);
-  if(!match||!labels.some(other=>other!==label&&/\b(?:floor plan|ceiling plan|site plan|demo(?:lition)? plan|roof plan|foundation plan)\b/i.test(other.text)&&
+  if(!match||!labels.some(other=>other!==label&&/\b(?:floor plan|demolition floor plan|ceiling plan|site plan|demo(?:lition)? plan|roof plan|foundation plan)\b/i.test(other.text)&&
     other.text.length<100&&Math.abs(other.bounds[0]-label.bounds[0])<=115&&
     Math.abs(other.bounds[1]-label.bounds[1])<=40))return;
   const inches=Number(match[1]??0)+Number(match[2])/Number(match[3]??1);

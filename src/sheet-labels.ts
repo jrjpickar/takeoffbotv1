@@ -24,3 +24,13 @@ export function sheetIdentity(label:string, lines:string[]){
 }
 
 export const normalizeSheetSearch=(text:string)=>text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+
+export function displaySheetName(name:string){
+  return decodeSheetLabel(/^Sheet \d+ \((.+)\)$/.exec(name)?.[1]??name).replace(/\\000|\0/g,'').trim();
+}
+
+export function decodeSheetLabel(label:string){
+  const encoded=/^<FEFF((?:[0-9a-f]{4})+)>$/i.exec(label.trim());
+  const decoded=encoded?encoded[1].replace(/.{4}/g,part=>String.fromCharCode(parseInt(part,16))):label;
+  return decoded.replace(/^\[\d+\]\s+(?=[A-Z]{1,5}[-.]?\d)/i,'').trim();
+}

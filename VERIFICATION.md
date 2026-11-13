@@ -67,3 +67,7 @@ The supplied ZIP contains the same 44-sheet PDF as the earlier Pine Street attac
 ## Plan navigation and automatic scale
 
 The hosted browser tests exercise dropping local plans, filtering the Pine Street sheet list to its two demolition-titled plans, highlighting demolition sheets, filtering ceiling sheets, and automatically applying the printed 3/16-inch-to-one-foot scale on A-1.04. The six ceiling candidates display SF after the scale is applied. Title- and label-based filters are navigation aids, and takeoff coverage is still limited as described in the whole-plan audit.
+
+### Tustin regression
+
+The engine scanned all 48 sheets in the supplied Tustin PDF. Sheet D-1.0 produced 23 partition candidates and the printed 1/4-inch-to-one-foot scale. Other sheets produced no supported takeoff candidates. Candidate lengths require estimator review and are not a verified total. The private Tustin and Pine Street plans are excluded from the deploy ZIP.

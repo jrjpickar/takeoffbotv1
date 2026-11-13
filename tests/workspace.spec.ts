@@ -70,6 +70,14 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await page.getByRole('button',{name:'Download STACK CSV'}).click();
   const dl=await downloadEvent;
   expect(readFileSync((await dl.path())!,'utf8')).toMatch(/,13\.66\d+,Ln Ft/);
+  await expect(page.locator('.measurement-group')).toHaveCount(8);
+  const allDownload=page.waitForEvent('download');
+  await page.getByRole('button',{name:'Export all takeoffs'}).click();
+  const all=await allDownload;
+  const fullCsv=readFileSync((await all.path())!,'utf8');
+  expect(fullCsv).toContain('In review');
+  expect(fullCsv).toContain('Approved');
+  expect(fullCsv.trim().split(/\r?\n/)).toHaveLength(9);
   await page.getByRole('button',{name:'Save',exact:true}).click();
   await expect(page.getByRole('status')).toHaveText('Saved revision 1.');
   await page.reload();
@@ -77,12 +85,12 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await expect(page.getByText('1 approved',{exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:/Interior walls approved.*edited 13\.67 LF/})).toBeVisible();
 
-  await page.getByRole('button',{name:/Sheet 2/}).click();
+  await page.getByRole('button',{name:/^(D102|Sheet 2)/}).click();
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true');
   await page.getByRole('button',{name:'Run sheet takeoff'}).click();
   await expect(page.getByRole('button',{name:/Interior walls review.*8 LF/})).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('1 added for review.');
-  await page.getByRole('button',{name:/Sheet 3/}).click();
+  await page.getByRole('button',{name:/^(D103|Sheet 3)/}).click();
   await page.getByRole('button',{name:'Run sheet takeoff'}).click();
   await page.getByText(/Sheet warnings/).click();
   await expect(page.getByText(/Raster (sheet: OpenCV found|backdrop detected)/)).toBeVisible();

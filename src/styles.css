@@ -54,7 +54,7 @@ button.active{background:var(--dm-accent-soft);border-color:var(--dm-accent-line
 .inspector{border-left:1px solid var(--dm-border)}
 .sheet-list{display:grid;gap:5px;margin-bottom:18px}
 .sheet-list button{display:grid;text-align:left;gap:3px;overflow:hidden}
-.sheet-list span{overflow:hidden;text-overflow:ellipsis}
+.sheet-list span{white-space:normal;overflow-wrap:anywhere}
 .layer-row{display:flex;align-items:center;border-radius:5px;gap:3px}
 .layer-row.chosen{background:var(--dm-accent-soft)}
 .layer-row button{flex:1;background:none;border-color:transparent;display:flex;align-items:center;gap:6px;text-align:left;font-size:12px;padding:5px;min-width:0}
@@ -86,7 +86,7 @@ summary{cursor:pointer;font-size:12px;font-weight:700}
 .review-counts span{background:var(--dm-surface-3);border-radius:4px;padding:4px 6px}
 .scale-status{margin:9px 0;color:var(--dm-text-2);font-size:11px}
 .measurements{display:grid;gap:4px;max-height:255px;overflow:auto}
-.measurements>button{display:flex;align-items:center;gap:7px;font-size:12px;text-align:left;padding:5px 6px}
+.measurement-group-items>button{display:flex;align-items:center;gap:7px;font-size:12px;text-align:left;padding:5px 6px}
 .measurements span{flex:1;min-width:0}
 .measurements small{display:block}
 .measurements p{font-size:12px}
@@ -144,3 +144,7 @@ footer{background:var(--dm-surface-2);border-top:1px solid var(--dm-border);disp
 :root[data-theme="light"] .error{color:#9d2116}
 :root[data-theme="light"] .file-drop-overlay{background:#fff6ede8}
 :root[data-theme="light"] .primary:hover:not(:disabled){color:#fff}
+
+.measurement-group{margin:0;padding:5px 0;border-top:1px solid var(--dm-border)}
+.measurement-group summary b{float:right;margin-left:6px}
+.measurement-group-items{display:grid;gap:4px;padding-top:5px}
