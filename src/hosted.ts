@@ -148,7 +148,7 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
     const state=body() as State;
     return fetch('/.netlify/functions/price',{
       method:'POST',headers:{'Content-Type':'application/json'},signal:init?.signal,
-      body:JSON.stringify({csv:csv(project,state,true),markup:state.markup}),
+      body:JSON.stringify({csv:csv(project,state,true),markup:state.markup,answers:state.answers}),
     });
   }
   const index=Number(sheet);

@@ -17,11 +17,11 @@ const style = require('./data/house_style.json');
 const engine = { parseStackCsv, autopilot, checkEstimate, findComps, learnedJobs, proposalFields, slotMap, reviewSheet };
 const assets = { rates, production, defaults, style, library: prepareLibrary({jobs: []}) };
 
-function price({ csv, markup, name }) {
+function price({ csv, markup, name, answers }) {
   const items = parseStackCsv(csv);
   if (!items.length) return null;
   const result = runAutoEstimateWith(engine, decisions, assets, {
-    takeoffCsv: csv, markup, job: {name},
+    takeoffCsv: csv, markup, answers, job: {name},
   });
   return {
     cost: result.price.cost, bid: result.price.bid, markup: result.price.markup,
@@ -30,7 +30,7 @@ function price({ csv, markup, name }) {
     })),
     scopeLines: result.scopeLines, proposalFields: result.proposalFields, items,
     warnings: [...new Set([...result.warnings, ...result.issues.map(issue => issue.message)])],
-    questions: result.questions, costSheet: result.costSheet,
+    questions: result.questions, removed: result.removed, costSheet: result.costSheet,
   };
 }
 module.exports = { price };

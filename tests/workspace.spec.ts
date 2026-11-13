@@ -29,19 +29,13 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(4);
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true');
 
-  await page.evaluate(()=>{
-    const rows=document.querySelector('.measurements')!;
-    const observer=new MutationObserver(()=>{
-      const n=rows.querySelectorAll('button').length;
-      if (n>0 && n<8) rows.setAttribute('data-saw-partial','true');
-    });
-    observer.observe(rows,{childList:true});
-  });
-  await page.getByRole('button',{name:'Run sheet takeoff'}).click();
+  await page.getByRole('button',{name:'Run colors…'}).click();
+  await page.getByRole('button',{name:'Rotate colors by item'}).click();
   await expect(page.locator('.measurements button')).toHaveCount(8);
   await expect(page.getByRole('status')).toHaveText('8 added for review.');
   await expect(page.getByText('8 in review')).toBeVisible();
-  await expect(page.locator('.measurements')).toHaveAttribute('data-saw-partial','true');
+  const colors=await page.locator('.measurements button i').evaluateAll(nodes=>nodes.map(n=>getComputedStyle(n).backgroundColor));
+  expect(new Set(colors).size).toBe(8);
   await page.getByRole('button',{name:/Interior walls review.*12 LF/}).click();
   await expect(page.getByText('Selected measurement')).toBeVisible();
   const handle=await planPoint(page,204,205), moved=await planPoint(page,228,205);
@@ -56,6 +50,20 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await page.getByRole('button',{name:/Interior walls review.*edited 13\.67 LF/}).click();
   await page.getByRole('button',{name:'Approve',exact:true}).click();
   await expect(page.getByText('1 approved',{exact:true})).toBeVisible();
+  await expect(page.locator('.bid')).toContainText('$5,635.00');
+  await page.getByLabel('Item color').fill('#0055ff');
+  await expect(page.locator('.measurements button.active i')).toHaveCSS('background-color','rgb(0, 85, 255)');
+  await expect(page.getByText('1 approved',{exact:true})).toBeVisible();
+  const questions=page.locator('.review-question');
+  await questions.filter({has:page.getByLabel('Workers',{exact:true})}).first().getByLabel('Days',{exact:true}).fill('2');
+  await questions.filter({has:page.getByLabel('Workers',{exact:true})}).first().getByRole('button',{name:'Apply',exact:true}).click();
+  await expect(page.locator('.bid')).toContainText('$9,315.00');
+  await page.getByRole('button',{name:'Reset answer'}).click();
+  await expect(page.locator('.bid')).toContainText('$5,635.00');
+  await page.getByText('Draft scope',{exact:true}).click();
+  await page.getByRole('button',{name:'Exclude from estimate'}).click();
+  await expect(page.getByRole('button',{name:'Restore to estimate'})).toBeVisible();
+  await page.getByRole('button',{name:'Restore to estimate'}).click();
   await expect(page.locator('.bid')).toContainText('$5,635.00');
   const downloadEvent=page.waitForEvent('download');
   await page.getByRole('button',{name:'Download STACK CSV'}).click();

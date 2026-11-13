@@ -20,6 +20,7 @@ Tool = Literal["line", "polyline", "polygon", "rect", "count"]
 Scope = Literal["wall", "floor", "ceiling", "slab", "door", "fixture", "sawcut", "millwork"]
 
 class Measurement(BaseModel):
+    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     id: str = Field(default_factory=lambda: str(uuid4()), max_length=180)
     sheet: int = Field(ge=0)
     scope: Scope
@@ -46,6 +47,7 @@ class StyleRule(BaseModel):
     dashed: bool = False
 
 class Revision(BaseModel):
+    answers: dict[str, str] = Field(default_factory=dict)
     revision: int = Field(ge=0)
     colors: dict[Scope, str] = Field(default_factory=dict)
     items: list[Measurement] = Field(default_factory=list, max_length=20000)

@@ -15,6 +15,8 @@ async function document(id:string, file:Blob) {
   if(current?.id===id) return current.doc;
   const doc=pdf.Document.openDocument(await file.arrayBuffer(),'application/pdf');
   current?.doc.destroy();
+  sheetCache.clear();
+  rasterCache.clear();
   current={id,doc};
   return doc;
 }
@@ -33,7 +35,18 @@ export async function sheets(id:string,file:Blob) {
     try{return sheetInfo(page,i);}finally{page.destroy();}
   });
 }
+const rasterCache=new Map<number,[Point,Point][]>();
+const sheetCache=new Map<number,Awaited<ReturnType<typeof extractSheet>>>();
 async function extract(id:string,file:Blob,index:number) {
+  await document(id,file);
+  const cached=sheetCache.get(index);
+  if(cached)return cached;
+  const result=await extractSheet(id,file,index);
+  if(sheetCache.size>=3)sheetCache.delete(sheetCache.keys().next().value!);
+  sheetCache.set(index,result);
+  return result;
+}
+async function extractSheet(id:string,file:Blob,index:number) {
   const doc=await document(id,file);
   const page=doc.loadPage(index);
   const [x0,y0,x1,y1]=page.getBounds('CropBox');
@@ -172,8 +185,10 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     path.bounds[2]<wallLegend.bounds[0]&&wallLegend.bounds[0]-path.bounds[2]<120&&
     path.bounds[1]>=wallLegend.bounds[1]-22&&path.bounds[3]<=wallLegend.bounds[3]+22).length>=5;
   if(raster&&wallLegend&&floorPlan&&redSwatch&&!input.rules.some(rule=>rule.scope==='wall')){
-    const page=(await document(id,file)).loadPage(index);
-    try {
+    let candidates=rasterCache.get(index);
+    if(!candidates){
+      const page=(await document(id,file)).loadPage(index);
+      try {
       const [x0,y0]=page.getBounds('CropBox');
       const left=Math.ceil(Math.max(wallLegend.bounds[2]+20,width*.22));
       const right=Math.floor(width*.83), top=Math.floor(height*.025), bottom=Math.floor(height*.96);
@@ -187,13 +202,17 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
           page.runPageContents(device,pdf.Matrix.scale(scale,scale));
           device.close();
           const pairs=wallPairs(pix.getPixels(),pix.getWidth(),pix.getHeight(),pix.getStride(),pix.getNumberOfComponents());
-          for(const [i,pts] of pairs.entries())emit('wall','line',pts.map(([u,v])=>[(u+x)/scale-x0,(v+y)/scale-y0]),
-            'Red paired wall outlines · WALL TO BE DEMO legend',`r${i}`,null);
-          if(pairs.length)warnings.push('Verify wall candidates against the drawing. Trace omitted diagonal, short, or interrupted walls manually. Doors and cubicles require separate review.');
-          else warnings.push('The wall legend matched, but no reliable paired red outlines were found.');
+          candidates=pairs.map(points=>points.map(([u,v])=>[(u+x)/scale-x0,(v+y)/scale-y0]) as [Point,Point]);
         }finally{device.destroy();pix.destroy();}
       }
-    }finally{page.destroy();}
+      }finally{page.destroy();}
+      if(rasterCache.size>=3)rasterCache.delete(rasterCache.keys().next().value!);
+      rasterCache.set(index,candidates??[]);
+    }
+    for(const [i,points] of (candidates??[]).entries())emit('wall','line',points,
+      'Red paired wall outlines · WALL TO BE DEMO legend',`r${i}`,null);
+    if(candidates?.length)warnings.push('Verify wall candidates against the drawing. Trace omitted diagonal, short, or interrupted walls manually. Doors and cubicles require separate review.');
+    else warnings.push('The wall legend matched, but no reliable paired red outlines were found.');
   }else if(raster)warnings.push('Raster backdrop detected. Calibrate and trace raster geometry manually.');
   if(!marks.size)warnings.push('No supported demolition geometry matched. Use manual tools or define a verified vector style rule.');
   const grouped=new Map<string,number>();

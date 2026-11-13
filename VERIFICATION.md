@@ -51,3 +51,7 @@ The supplied archive included a Desk CSV fixture and plan-text fixture. It did n
 ## Pine Street regression
 
 The hosted Chromium test imported the supplied 44-sheet ZIP, ignored macOS metadata, manually calibrated sheet A-1.01, and returned 26 editable wall centerline candidates with one review note. It also verified clear and undo, saved custom colors, reload, wheel zoom, and Space-drag pan. Two existing hosted browser workflows passed. The raster rule was tested on this one drawing layout. No complete wall-length accuracy or door/fixture coverage was established. The private PDF is excluded from the release.
+
+## Faster runs and interactive review
+
+The browser paints available measurement batches on animation frames without an artificial pause per item. The worker reuses the last three extracted sheets and raster wall results for the active PDF. Repricing skips color-only changes. No before-and-after runtime benchmark was collected. The current Desk attachment's decision and Auto Estimate runner sources match the sandbox copies. Chromium verified eight distinct item colors, an item override with approval retained, crew repricing from $5,635 to $9,315, answer reset, and scope exclusion and restoration. The Pine Street plan remains private and is excluded from this update.

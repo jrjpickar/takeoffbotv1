@@ -14,14 +14,14 @@ export type Tool = 'line' | 'polyline' | 'polygon' | 'rect' | 'count';
 export type Mode = Tool | 'select' | 'pan' | 'calibrate';
 export type Status = 'review' | 'approved' | 'rejected';
 export interface Item {
-  id: string; sheet: number; scope: Scope; tool: Tool; points: Point[];
+  color?: string; id: string; sheet: number; scope: Scope; tool: Tool; points: Point[];
   status: Status; source: string; thickness: number | null; edited: boolean;
 }
 export interface Calibration { points: [Point, Point]; feet: number; source: string }
 export type ScopeColors = Partial<Record<Scope,string>>;
 export const scopeColor = (scope:Scope, colors?:ScopeColors) => colors?.[scope] ?? scopes[scope][2];
 export interface State {
-  colors?: ScopeColors;
+  colors?: ScopeColors; answers?: Record<string,string>;
   revision: number; items: Item[]; scales: Record<number, Calibration>;
   notes: Record<number, string[]>; rules: Record<number, Rule[]>; markup: number | null;
 }
@@ -33,7 +33,16 @@ export const deskNames: Record<Scope,string> = {
   slab:'Remove concrete slab', door:'Remove doors', fixture:'Remove plumbing fixtures',
   sawcut:'Sawcut concrete', millwork:'Remove millwork',
 };
+export interface PriceQuestion {
+  key:string; title:string; detail?:string; tag:string; open:boolean;
+  answer:string|null; autoAnswered?:boolean;
+  options:{id:string;label:string}[];
+  picker?: {kind:'crew'|'loads';workers?:number;days?:number;loads?:number;
+    max:{workers?:number;days?:number;loads?:number}}|null;
+}
 export interface Price {
+  questions?:PriceQuestion[];
+  removed?:{key:string;text:string}[];
   scopeLines: {name:string; lines:{text:string; key:string}[]}[];
   cost: number; bid: number; markup: number; warnings: string[];
   sections: {name: string; subtotal: number; lines: {

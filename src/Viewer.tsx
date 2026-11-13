@@ -69,6 +69,16 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
     if (scroll.current) observer.observe(scroll.current);
     return () => observer.disconnect();
   }, []);
+  useEffect(()=>{
+    const el=scroll.current, rect=paper.current?.getBoundingClientRect();
+    const selectedItem=items.find(item=>item.id===selected);
+    if(!el||!rect||!selectedItem)return;
+    const bounds=el.getBoundingClientRect();
+    const x=rect.left+selectedItem.points[0][0]*z;
+    const y=rect.top+selectedItem.points[0][1]*z;
+    if(x<bounds.left+16||x>bounds.right-16)el.scrollLeft+=x-(bounds.left+bounds.right)/2;
+    if(y<bounds.top+16||y>bounds.bottom-16)el.scrollTop+=y-(bounds.top+bounds.bottom)/2;
+  },[selected,index]);
   const [doc, setDoc] = useState<Awaited<ReturnType<typeof getDocument>['promise']>>();
   useEffect(() => {
     let live = true;
@@ -179,7 +189,7 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
             {calibration && <Line points={points(calibration.points)} listening={false}
               stroke="#1b6575" strokeWidth={1.5} dash={[5,4]} />}
             {[...items.filter(item=>item.id!==selected), ...items.filter(item=>item.id===selected)].map(item => {
-              const active = item.id===selected, color=scopeColor(item.scope,colors);
+              const active = item.id===selected, color=item.color ?? scopeColor(item.scope,colors);
               const [x,y] = item.points[0];
               const qty = measure(item, calibration);
               const tag = qty ? `${quantity(qty.value)} ${qty.unit}` : 'Review';

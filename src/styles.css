@@ -110,3 +110,10 @@ footer{background:var(--dm-surface-2);border-top:1px solid var(--dm-border);disp
 .primary:hover:not(:disabled){background:var(--dm-accent-strong);color:var(--dm-bg)}
 .layer-row button>i{display:none}
 .layer-row button{white-space:normal}
+
+.run-colors,.takeoff-review-controls,.review-picker{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.run-colors{padding:8px 13px;background:var(--dm-surface-2);border-bottom:1px solid var(--dm-border)}
+.takeoff-review-controls{margin-bottom:7px;font-size:11px}
+.review-question,.scope-review-line{padding:8px 0;border-bottom:1px solid var(--dm-border)}
+.review-picker input{width:62px}
+.review-question>button,.scope-review-line>button{font-size:11px;margin:5px 4px 0 0}

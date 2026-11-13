@@ -237,7 +237,7 @@ def price(project_id: str, state: Revision):
     try:
         result = subprocess.run(["node", str(ROOT / "desk/cli.cjs")], capture_output=True,
                                 text=True, input=json.dumps({"csv": csv_for(p, state),
-                                "markup": state.markup, "name": p["name"]}), timeout=10, check=True)
+                                "markup": state.markup, "answers": state.answers, "name": p["name"]}), timeout=10, check=True)
         return json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         raise HTTPException(503, "Local Desk pricing is unavailable. Check that Node is installed.") from None

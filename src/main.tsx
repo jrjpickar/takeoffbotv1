@@ -1,3 +1,4 @@
+import { EstimateReview } from './EstimateReview';
 import { PasscodeGate } from './PasscodeGate';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -21,6 +22,7 @@ const changeScale = (s: State, sheet: number, scale: Calibration): State => ({
 });
 type Extraction = {paths: {color: string | null; dashed: boolean;
   items: [string,Point[]][]}[]};
+const itemPalette=['#c2410c','#1e68c9','#16714b','#8053c5','#a16b00','#b22c82','#007b84','#755334'];
 const emptyState: State = {revision:0,items:[],scales:{},notes:{},rules:{},markup:null};
 
 async function stream(url: string, body: unknown, handle: (kind: string, data: unknown) => Promise<void>) {
@@ -64,6 +66,9 @@ function App() {
   const [hidden,setHidden]=useState<Scope[]>([]);
   const [pending,setPending]=useState<Point[]>([]);
   const [feet,setFeet]=useState('');
+  const [colorPrompt,setColorPrompt]=useState(false);
+  const [runColor,setRunColor]=useState('#c2410c');
+  const [reviewOnly,setReviewOnly]=useState(false);
   const [selected,setSelected]=useState<string>();
   const [undo,setUndo]=useState<State[]>([]);
   const [redo,setRedo]=useState<State[]>([]);
@@ -108,18 +113,22 @@ function App() {
       .then(setExtraction).catch(e=>{if(!ctl.signal.aborted) report(e);});
     return ()=>ctl.abort();
   },[root,sheet]);
+  const pricingInput=JSON.stringify({
+    items:state.items.filter(i=>i.status==='approved').map(({color,...item})=>item),
+    scales:state.scales,markup:state.markup,answers:state.answers,revision:0,notes:{},rules:{},
+  });
   useEffect(()=>{
-    setPrice(null);
-    if (!root || !state.items.some(i=>i.status==='approved')) { setPricing(''); return; }
+    if(!root || !JSON.parse(pricingInput).items.length)setPrice(null);
+    if (!root || !JSON.parse(pricingInput).items.length) { setPricing(''); return; }
     const ctl=new AbortController();
     setPricing('Calculating approved scope…');
     const timer=window.setTimeout(()=>{
-      request(root+'/price',{...json(state),signal:ctl.signal}).then(r=>r.json()).then(result=>{
-        setPrice(result); setPricing('');
+      request(root+'/price',{...json(null),body:pricingInput,signal:ctl.signal}).then(r=>r.json()).then(result=>{
+        if(!ctl.signal.aborted){setPrice(result);setPricing('');}
       }).catch(e=>{if(!ctl.signal.aborted) setPricing(e.message);});
     },220);
     return ()=>{clearTimeout(timer);ctl.abort();};
-  },[root,state]);
+  },[root,pricingInput]);
 
   function commit(update: State) {
     setUndo(prev=>[...prev.slice(-49),state]);
@@ -223,13 +232,25 @@ function App() {
     } catch(e) {report(e);}
     finally {setBusy('');}
   }
-  async function run() {
+  async function run(colorMode:'scope'|'single'|'items'='scope') {
+    setColorPrompt(false);
     setBusy('Processing sheet…');setError('');setNotice('');setPending([]);setMode('select');
     setUndo(prev=>[...prev.slice(-49),state]);setRedo([]);
     const ids=new Set(state.items.map(i=>i.id));
     const geometryKey=(i:Item)=>JSON.stringify([i.sheet,i.scope,i.points.map(p=>p.map(v=>Math.round(v*10000))).sort()]);
     const existingGeometry=new Set(state.items.map(geometryKey));
     let added=0, skipped=0;
+    let batch:Item[]=[];
+    let frame:number|undefined;
+    const flush=()=>{
+      if(frame!==undefined)cancelAnimationFrame(frame);
+      frame=undefined;
+      if(!batch.length)return;
+      const ready=batch;batch=[];
+      const visibleScopes=new Set(ready.map(i=>i.scope));
+      setState(prev=>({...prev,items:[...prev.items,...ready]}));
+      setHidden(prev=>prev.filter(scope=>!visibleScopes.has(scope)));
+    };
     try {
       await stream(`${root}/sheets/${sheet}/run`,{calibration:cal,rules},async (kind,data)=>{
         if (kind==='scale') setState(prev=>changeScale(prev,sheet,data as Calibration));
@@ -238,19 +259,16 @@ function App() {
           const key=geometryKey(candidate);
           if (ids.has(candidate.id) || existingGeometry.has(key)) {skipped++;return;}
           ids.add(candidate.id);existingGeometry.add(key);added++;
-          setState(prev=>({...prev,items:[...prev.items,candidate]}));
-          setHidden(prev=>prev.filter(s=>s!==candidate.scope));
-          // Allow completed geometry to paint before consuming the next event.
-          if (added <= 12 || added % 8 === 0) await new Promise<void>(resolve=>{
-            const timer=window.setTimeout(resolve,100);
-            requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(timer);resolve();}));
-          });
+          const color=colorMode==='single'?runColor:colorMode==='items'?itemPalette[(added-1)%itemPalette.length]:undefined;
+          batch.push(color?{...candidate,color}:candidate);
+          if(frame===undefined)frame=requestAnimationFrame(flush);
         }
         if (kind==='warnings') setState(prev=>({...prev,notes:{...prev.notes,[sheet]:data as string[]}}));
       });
+      flush();
       setNotice(`${added} added for review${skipped ? `, ${skipped} already present` : ''}.`);
     } catch(e) {report(e);}
-    finally {setBusy('');}
+    finally {flush();setBusy('');}
   }
   async function exportCsv() {
     try {
@@ -310,6 +328,7 @@ function App() {
         <label className="inline"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/> Snap</label>
         <div className="toolbar-end">
           <button onClick={()=>void run()}>Run sheet takeoff</button>
+          <button aria-expanded={colorPrompt} onClick={()=>setColorPrompt(!colorPrompt)}>Run colors…</button>
           <button disabled={!localItems.length} onClick={()=>{
             if(!window.confirm(`Clear ${localItems.length} takeoffs from this sheet? You can undo this.`))return;
             commit({...state,items:state.items.filter(item=>item.sheet!==sheet),notes:{...state.notes,[sheet]:[]}});
@@ -318,6 +337,13 @@ function App() {
           <button className="primary" onClick={()=>void save()}>Save</button>
         </div>
       </fieldset>
+      {colorPrompt&&<div className="run-colors" role="group" aria-label="Optional takeoff colors">
+        <button onClick={()=>void run()}>Use scope colors</button>
+        <button onClick={()=>void run('items')}>Rotate colors by item</button>
+        <label className="inline">Single color <input aria-label="Run color" type="color" value={runColor} onChange={e=>setRunColor(e.target.value)}/></label>
+        <button onClick={()=>void run('single')}>Run with this color</button>
+        <button onClick={()=>setColorPrompt(false)}>Cancel</button>
+      </div>}
       <main className="workspace">
         <fieldset className="panel sidebar" disabled={!!busy}>
           <h2>Sheets</h2>
@@ -386,13 +412,21 @@ function App() {
           <h2>Takeoff review</h2>
           <div className="review-counts"><span>{approved} approved</span><span>{review} in review</span></div>
           <div className="scale-status">{cal ? `${quantity(cal.feet)} ft calibration · ${cal.source}` : 'Sheet scale required for lengths and areas'}</div>
+          <div className="takeoff-review-controls">
+            <label className="inline"><input type="checkbox" checked={reviewOnly} onChange={e=>setReviewOnly(e.target.checked)}/> Needs review only</label>
+            <button disabled={!localItems.some(i=>i.status==='review'&&measure(i,cal))} onClick={()=>{
+              const queue=localItems.filter(i=>i.status==='review'&&measure(i,cal));
+              const next=queue[(queue.findIndex(i=>i.id===selected)+1)%queue.length];
+              if(next){setSelected(next.id);setHidden(hidden.filter(s=>s!==next.scope));changeMode('select');}
+            }}>Next review</button>
+          </div>
           <div className="measurements">
             {localItems.length===0 && <p>Trace a scope or run sheet takeoff.</p>}
-            {localItems.map(i=>{
+            {localItems.filter(i=>!reviewOnly||i.status==='review').map(i=>{
               const m=measure(i,cal);
               return <button key={i.id} className={i.id===selected?'active':''} onClick={()=>{
                 setSelected(i.id);setHidden(hidden.filter(s=>s!==i.scope));changeMode('select');
-              }}><i style={{background:scopeColor(i.scope,state.colors)}}/><span>{scopes[i.scope][0]}
+              }}><i style={{background:i.color??scopeColor(i.scope,state.colors)}}/><span>{scopes[i.scope][0]}
                 <small>{i.status} · {i.edited?'edited':i.source.startsWith('Manual')?'manual':'rule match'}</small>
               </span><b>{m?`${quantity(m.value)} ${m.unit}`:'—'}</b></button>;
             })}
@@ -401,6 +435,9 @@ function App() {
             <h3>Selected measurement</h3>
             <small>{project.sheets[sheet].name} · {item.source}{item.edited?' · Edited':''}</small>
             {linkedScope && item.status==='approved' && <p>Desk scope · {linkedScope.text}</p>}
+            <label>Item color <input type="color" value={item.color??scopeColor(item.scope,state.colors)}
+              onChange={e=>edit({...item,color:e.target.value})}/></label>
+            {item.color&&<button onClick={()=>edit({...item,color:undefined})}>Use scope color</button>}
             <label>Assigned scope <select value={item.scope} onChange={e=>{
               const target=e.target.value as Scope;
               edit({...item,scope:target,status:'review',edited:true,thickness:target==='slab'?item.thickness:null});
@@ -438,6 +475,15 @@ function App() {
               value={state.markup===null?'':Number((state.markup*100).toFixed(8))}
               onChange={e=>commit({...state,markup:e.target.value===''?null:Math.max(0,Number(e.target.value))/100})}/></label>
             {price ? <>
+              {pricing&&<p aria-live="polite">{pricing}</p>}
+              <EstimateReview price={price} answers={state.answers??{}} update={(key,value)=>{
+                const answers={...state.answers};
+                if(value)answers[key]=value;else delete answers[key];
+                commit({...state,answers});
+              }} jump={key=>{
+                const target=state.items.find(i=>i.status==='approved'&&key===`item:${deskNames[i.scope].toLowerCase()}|${scopes[i.scope][1]}`);
+                if(target){changeSheet(target.sheet);setSelected(target.id);setHidden(hidden.filter(s=>s!==target.scope));changeMode('select');}
+              }}/>
               <div className="cost-line"><span>Direct cost</span><b>{currency(price.cost)}</b></div>
               <div className="cost-line bid"><span>Draft bid</span><strong>{currency(price.bid)}</strong></div>
               <details><summary>Labor, hauling and equipment</summary>
