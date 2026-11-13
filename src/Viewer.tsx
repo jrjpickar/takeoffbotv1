@@ -3,7 +3,7 @@ import { Stage, Layer, Group, Line, Rect, Circle, Text } from 'react-konva';
 import type Konva from 'konva';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import worker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { type Calibration, type Item, type Mode, type Point, type Sheet, type Scope, distance, scopes, measure, quantity } from './domain';
+import { type Calibration, type Item, type Mode, type Point, type Sheet, type Scope, distance, scopes, measure, quantity, request } from './domain';
 
 GlobalWorkerOptions.workerSrc = worker;
 interface Props {
@@ -37,12 +37,20 @@ export function Viewer({ url, index, sheet, items, calibration, mode, activeScop
     let live = true;
     setDoc(undefined);
     setError('');
-    const task = getDocument({url,
-      standardFontDataUrl:'/pdf-assets/standard_fonts/', cMapUrl:'/pdf-assets/cmaps/',
-      cMapPacked:true, wasmUrl:'/pdf-assets/wasm/'});
-    task.promise.then(d => { if (live) setDoc(d); })
-      .catch(e => { if (live) setError(e.message); });
-    return () => { live = false; void task.destroy(); };
+    const ctl=new AbortController();
+    const options={standardFontDataUrl:'/pdf-assets/standard_fonts/',cMapUrl:'/pdf-assets/cmaps/',
+      cMapPacked:true,wasmUrl:'/pdf-assets/wasm/'};
+    let task:ReturnType<typeof getDocument>|undefined;
+    (async()=>{
+      if(import.meta.env.MODE==='netlify'){
+        const bytes=await (await request(url,{signal:ctl.signal})).arrayBuffer();
+        if(!live)return;
+        task=getDocument({...options,data:bytes});
+      }else task=getDocument({...options,url});
+      const loaded=await task.promise;
+      if(live)setDoc(loaded);
+    })().catch(e=>{if(live)setError(e.message);});
+    return ()=>{live=false;ctl.abort();void task?.destroy();};
   }, [url]);
   useEffect(() => {
     if (!doc || !canvas.current) return;

@@ -22,7 +22,7 @@ export interface State {
   revision: number; items: Item[]; scales: Record<number, Calibration>;
   notes: Record<number, string[]>; rules: Record<number, Rule[]>; markup: number | null;
 }
-export interface Sheet { name: string; width: number; height: number }
+export interface Sheet { name: string; width: number; height: number; planName?: string }
 export interface Project { id: string; name: string; sheets: Sheet[]; state: State }
 export interface Rule { scope: Scope; color: string; dashed: boolean }
 export const deskNames: Record<Scope,string> = {
@@ -85,7 +85,9 @@ export function measure(item: Item, scale?: Calibration) {
 export const quantity = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 export const currency = (n: number) => n.toLocaleString('en-US', {style:'currency',currency:'USD'});
 export async function request(url: string, init?: RequestInit) {
-  const response = await fetch(url, init);
+  const response = import.meta.env.MODE === 'netlify'
+    ? await (await import('./hosted')).hostedRequest(url, init)
+    : await fetch(url, init);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(typeof data.detail === 'string' ? data.detail : `Request failed (${response.status}).`);

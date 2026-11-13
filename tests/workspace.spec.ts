@@ -71,7 +71,7 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await expect(page.getByRole('status')).toHaveText('1 added for review.');
   await page.getByRole('button',{name:/Sheet 3/}).click();
   await page.getByRole('button',{name:'Run sheet takeoff'}).click();
-  await expect(page.getByText(/Raster sheet: OpenCV found/)).toBeVisible();
+  await expect(page.getByText(/Raster (sheet: OpenCV found|backdrop detected)/)).toBeVisible();
   await expect(page.locator('.measurements button')).toHaveCount(0);
 
   await page.getByRole('button',{name:'Calibrate',exact:true}).click();
@@ -140,7 +140,18 @@ test('draw remaining tools and move a count on the original plan',async({page})=
   await page.getByRole('button',{name:'Save',exact:true}).click();
   await expect(page.getByRole('status')).toHaveText('Saved revision 1.');
   const id=await page.getByRole('combobox',{name:'Open saved project'}).inputValue();
-  const result=await (await page.request.get('/api/projects/'+id)).json();
+  const result=await page.evaluate(async id=>{
+    if (!document.documentElement.dataset.hosted) return (await fetch('/api/projects/'+id)).json();
+    return new Promise<any>((resolve,reject)=>{
+      const db=indexedDB.open('a2z-takeoff-sandbox');
+      db.onerror=()=>reject(db.error);
+      db.onsuccess=()=>{
+        const request=db.result.transaction('projects').objectStore('projects').get(id);
+        request.onerror=()=>reject(request.error);
+        request.onsuccess=()=>{resolve({state:request.result.revisions.at(-1)});db.result.close();};
+      };
+    });
+  },id);
   const x=result.state.items.find((item:{scope:string})=>item.scope==='door').points[0][0];
   expect(x).toBeGreaterThan(249);
   expect(x).toBeLessThan(251);

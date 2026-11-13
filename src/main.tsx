@@ -458,4 +458,5 @@ function App() {
   </div>;
 }
 
+if(import.meta.env.MODE==='netlify')document.documentElement.dataset.hosted='true';
 createRoot(document.getElementById('root')!).render(<App/>);

@@ -132,7 +132,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code,422)
 
     def test_desk_reference_price(self):
-        run = subprocess.run(["node",str(ROOT/"desk/adapter.cjs")],text=True,capture_output=True,check=True,
+        run = subprocess.run(["node",str(ROOT/"desk/cli.cjs")],text=True,capture_output=True,check=True,
             input=json.dumps({"csv":(ROOT/"samples/desk-reference.csv").read_text(),"name":"Fixture"}))
         result = json.loads(run.stdout)
         self.assertEqual((result["cost"],result["bid"]),(6325,14547))

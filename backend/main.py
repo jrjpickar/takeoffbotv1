@@ -235,7 +235,7 @@ def price(project_id: str, state: Revision):
     p = project(project_id)
     validate(p, state)
     try:
-        result = subprocess.run(["node", str(ROOT / "desk/adapter.cjs")], capture_output=True,
+        result = subprocess.run(["node", str(ROOT / "desk/cli.cjs")], capture_output=True,
                                 text=True, input=json.dumps({"csv": csv_for(p, state),
                                 "markup": state.markup, "name": p["name"]}), timeout=10, check=True)
         return json.loads(result.stdout)

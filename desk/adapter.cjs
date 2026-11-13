@@ -1,5 +1,4 @@
 'use strict';
-const { readFileSync } = require('node:fs');
 const { parseStackCsv, prepareLibrary } = require('./lib/common');
 const { autopilot } = require('./lib/autopilot');
 const { checkEstimate } = require('./lib/checks');
@@ -35,4 +34,3 @@ function price({ csv, markup, name }) {
   };
 }
 module.exports = { price };
-if (require.main === module) process.stdout.write(JSON.stringify(price(JSON.parse(readFileSync(0, 'utf8')))));

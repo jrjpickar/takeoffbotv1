@@ -38,3 +38,11 @@ The supplied archive included a Desk CSV fixture and plan-text fixture. It did n
 - The viewer supports one PDF per project. Overlay editing uses existing vertices and compatible scope types. Use manual retracing when the shape or unit needs to change. Cross-sheet and cross-project revisions and overlap reconciliation need production design.
 - Confirm export names, units and upload behavior with the current Desk in staging. Map project IDs, plan versions, approvals, question answers, and cost worksheet/proposal handoff before wiring the adapter. Agree on whether slab CY should affect disposal pricing and how to prevent double charging. Refresh rates through a controlled snapshot.
 - Add production authentication, access controls, file screening, durable storage and backups, PDF parser isolation, processing limits, and browser/performance testing on large drawing sets. No production code, credentials, endpoints, GHL, Make, or deployment were changed.
+
+
+## Netlify target verification
+
+- Hosted TypeScript and Vite build completed. Chromium passed both browser tests against the hosted assets and pricing function handler. Tests exercised local file selection, four sheets, incremental overlays, editing, calibration, pricing, export, and persistent reopening.
+- The pricing function returned $6,325 cost and $14,547 bid on the Desk reference fixture.
+- The hosted variant keeps the uploaded PDF and saved takeoff on-device. The pricing function receives the scope quantities and markup, with anonymous sheet numbers. The public bundle excludes the Desk rate tables. Hosted raster detection flags a backdrop for manual tracing.
+- The Netlify account session reached sign-in. No live deployment URL or Netlify-hosted execution was verified.

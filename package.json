@@ -12,7 +12,8 @@
     "build": "tsc --noEmit && vite build",
     "predev": "node scripts/pdf-assets.cjs",
     "prebuild": "node scripts/pdf-assets.cjs",
-    "start": "python -m backend.launch"
+    "start": "python -m backend.launch",
+    "build:netlify": "node scripts/pdf-assets.cjs && tsc --noEmit && vite build --mode netlify"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +21,7 @@
   "type": "commonjs",
   "dependencies": {
     "konva": "10.9.1",
+    "mupdf": "1.28.6",
     "pdfjs-dist": "5.7.284",
     "react": "19.3.1",
     "react-dom": "19.3.1",

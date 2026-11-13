@@ -2,9 +2,17 @@
 
 A local commercial interior demolition takeoff workspace. It stores PDF bytes and saved takeoff revisions on your computer. The app uses deterministic rules and geometry. No account, API key, model, or production connection is required.
 
+## Deploy to Netlify
+
+Extract this ZIP at the root of a dedicated **private sandbox repository**. In your Netlify account, import that repository as a **new sandbox site**. Leave the base directory blank. The included `netlify.toml` sets the build command to `npm run build:netlify`, the publish directory to `dist`, and the Functions directory to `netlify/sandbox-functions`. The site needs zero user-configured environment variables or credentials. Use a sandbox project with no inherited Desk secrets. Keep Netlify secret scanning enabled.
+
+After deployment, open the site URL and click **Open sample** or **Upload PDF**. Netlify serves the app and a pricing function. A browser worker processes PDF geometry. IndexedDB stores originals and revisions on that browser and site URL. Clearing site data erases those projects. Projects do not sync between browsers or deployment URLs. Pricing sends approved quantities and markup to the Netlify function. PDF bytes, project names, sheet labels and measurement IDs stay in the browser. For a team-only sandbox, set access controls on the sandbox site before sharing it. The pricing endpoint otherwise responds to visitors who can reach the site.
+
+Deploy the repository through Netlify or use the Netlify CLI with its Functions directory. The published site requires the pricing function as well as the static build.
+
 ## Start locally
 
-Run this sandbox on your computer. Setup requires zero environment variables or credentials. Netlify is a separate deployment workflow and does not run this local Python server. Extract the ZIP and open a terminal in the folder that directly contains `package.json` and `backend/`.
+Run this sandbox on your computer. Setup requires zero environment variables or credentials. Extract the ZIP and open a terminal in the folder that directly contains `package.json` and `backend/`.
 
 Install Python 3.11 or 3.12 and Node.js 22.12 or newer on a system supported by both runtimes.
 
@@ -51,3 +59,7 @@ npm test
 ```
 
 Stop any local app server on port 8765 before the browser tests. They start an isolated server and temporary database. Regenerate the synthetic PDF with `python samples/generate.py`. See [VERIFICATION.md](VERIFICATION.md) for measured results, the Desk contract, and remaining integration work.
+
+### Hosted verification
+
+Run `npm run build:netlify` and `npm test -- --config=playwright.netlify.config.ts` after installing Chromium for Playwright. The suite serves the static build and invokes the same pricing handler that ships to Netlify. The hosted target uses MuPDF WebAssembly to extract annotated geometry and styled vector strokes. It flags raster backdrops for manual tracing and does not run the local OpenCV line detector. The hosted workspace reuses the Desk pricing adapter server-side.
