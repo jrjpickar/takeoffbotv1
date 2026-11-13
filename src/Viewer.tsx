@@ -186,7 +186,7 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
             if (p) addPoint(p);
           }}>
           <Layer>
-            {calibration && <Line points={points(calibration.points)} listening={false}
+            {calibration && !calibration.source.startsWith('Printed scale:') && <Line points={points(calibration.points)} listening={false}
               stroke="#1b6575" strokeWidth={1.5} dash={[5,4]} />}
             {[...items.filter(item=>item.id!==selected), ...items.filter(item=>item.id===selected)].map(item => {
               const active = item.id===selected, color=scopeColor(item.scope,colors);

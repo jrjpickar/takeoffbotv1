@@ -20,8 +20,24 @@ const changeScale = (s: State, sheet: number, scale: Calibration): State => ({
   ...s, scales: {...s.scales,[sheet]:scale},
   items:s.items.map(i=>i.sheet===sheet && i.status==='approved' && i.tool!=='count' ? {...i,status:'review'} : i),
 });
-type Extraction = {paths: {color: string | null; dashed: boolean;
+type Extraction = {scale?:Calibration;scopeHints?:Scope[];paths: {color: string | null; dashed: boolean;
   items: [string,Point[]][]}[]};
+function sheetMatches(name:string, filter:Scope|'demo'|'all') {
+  if(filter==='all')return true;
+  const demo=/\b(?:demo(?:lition)?|removal|strip[- ]?out|tear[- ]?out)\b/i.test(name);
+  if(filter==='demo')return demo;
+  if(filter==='ceiling')return /\b(?:ceiling|rcp)\b/i.test(name);
+  if(!demo)return false;
+  const cues:Partial<Record<Scope,RegExp>>={
+    wall:/\b(?:walls?|partitions?|floor plan|demolition plan)\b/i,
+    floor:/\b(?:flooring|finishes|carpet)\b/i,
+    slab:/\b(?:concrete|slab)\b/i,
+    door:/\b(?:doors?|openings)\b/i,
+    fixture:/\b(?:plumbing|fixtures?)\b/i,
+    sawcut:/\bsaw[ -]?cut/i,millwork:/\b(?:millwork|casework)\b/i,
+  };
+  return cues[filter]?.test(name)??false;
+}
 const emptyState: State = {revision:0,items:[],scales:{},notes:{},rules:{},markup:null};
 
 async function stream(url: string, body: unknown, handle: (kind: string, data: unknown) => void) {
@@ -58,6 +74,10 @@ function App() {
   const [state,setState]=useState<State>(emptyState);
   const [saved,setSaved]=useState<State>(emptyState);
   const [sheet,setSheet]=useState(0);
+  const [sheetFilter,setSheetFilter]=useState<Scope|'demo'|'all'>('all');
+  const [sheetHints,setSheetHints]=useState<Record<number,Scope[]>>({});
+  const [dragging,setDragging]=useState(false);
+  const dragDepth=useRef(0);
   const [scope,setScope]=useState<Scope>('wall');
   const [mode,setMode]=useState<Mode>('select');
   const [zoom,setZoom]=useState(1);
@@ -109,7 +129,12 @@ function App() {
     if (!root) return;
     const ctl=new AbortController();
     request(`${root}/sheets/${sheet}/vectors`,{signal:ctl.signal}).then(r=>r.json())
-      .then(result=>{if(!ctl.signal.aborted)setExtraction(result);}).catch(e=>{if(!ctl.signal.aborted) report(e);});
+      .then((result:Extraction)=>{
+        if(ctl.signal.aborted)return;
+        setExtraction(result);
+        if(result.scopeHints?.length)setSheetHints(prev=>({...prev,[sheet]:result.scopeHints!}));
+        if(result.scale)setState(prev=>prev.scales[sheet]?prev:changeScale(prev,sheet,result.scale!));
+      }).catch(e=>{if(!ctl.signal.aborted) report(e);});
     return ()=>ctl.abort();
   },[root,sheet]);
   const pricingInput=JSON.stringify({
@@ -169,11 +194,18 @@ function App() {
     try {
       let p=await (await request(endpoint,init)).json() as Project;
       if (!p.state) p=await (await request(`/api/projects/${p.id}`)).json();
-      setProject(p);setState(p.state);setSaved(p.state);changeSheet(0);
+      setSheetFilter('all');setSheetHints({});setProject(p);setState(p.state);setSaved(p.state);changeSheet(0);
       setUndo([]);setRedo([]);setZoom(1);setHidden([]);setSavedRevision('');changeMode('select');
       setProjects(await (await request('/api/projects')).json());
     } catch(e) { report(e); }
     finally { setBusy(''); }
+  }
+  function uploadPlan(file?:File) {
+    if(!file||busy)return;
+    const zip=import.meta.env.MODE==='netlify'&&/\.zip$/i.test(file.name);
+    if(!zip&&!/\.pdf$/i.test(file.name)){setError('Choose a supported PDF or ZIP plan file.');return;}
+    const data=new FormData();data.set('file',file);
+    void open('/api/projects',{method:'POST',body:data});
   }
   function finish(tool: Tool, pts: Point[]) {
     if ((tool==='polygon' && pts.length<3) || (tool==='polyline' && pts.length<2)) {
@@ -259,6 +291,7 @@ function App() {
         let found=false;
         try {
           await stream(`${root}/sheets/${index}/run`,{calibration:state.scales[index],rules:state.rules?.[index]??[]},(kind,data)=>{
+            if(kind==='scopeHints'&&(data as Scope[]).length)setSheetHints(prev=>({...prev,[index]:data as Scope[]}));
             if (kind==='scale') setState(prev=>changeScale(prev,index,data as Calibration));
             if(kind==='measurement'||kind==='measurements'){
               const candidates=kind==='measurements'?data as Item[]:[data as Item];
@@ -315,7 +348,36 @@ function App() {
     mode==='select' ? 'Select a measurement to move it or drag a vertex to resize.' :
     mode==='pan' ? 'Drag to pan the sheet.' : unitExample[mode];
 
-  return <div className="app">
+  const sheetScopes=useMemo(()=>{
+    const result=new Map<number,Set<Scope>>();
+    for(const item of state.items){
+      if(item.status==='rejected')continue;
+      const set=result.get(item.sheet)??new Set<Scope>();
+      set.add(item.scope);result.set(item.sheet,set);
+    }
+    return result;
+  },[state.items]);
+  const filteredSheets=project?.sheets.map((view,index)=>({view,index})).filter(({view,index})=>
+    sheetMatches(view.name,sheetFilter)||
+    (sheetFilter==='demo' ? (sheetScopes.get(index)?.size??0)>0 || !!sheetHints[index]?.length :
+      sheetFilter!=='all'&&(sheetScopes.get(index)?.has(sheetFilter)||sheetHints[index]?.includes(sheetFilter))))??[];
+  return <div className="app" onDragEnter={e=>{
+    if(!e.dataTransfer.types.includes('Files'))return;
+    e.preventDefault();dragDepth.current++;if(!busy)setDragging(true);
+  }} onDragOver={e=>{
+    if(!e.dataTransfer.types.includes('Files'))return;
+    e.preventDefault();e.dataTransfer.dropEffect=busy?'none':'copy';
+  }} onDragLeave={()=>{
+    dragDepth.current=Math.max(0,dragDepth.current-1);
+    if(!dragDepth.current)setDragging(false);
+  }} onDrop={e=>{
+    if(!e.dataTransfer.files.length)return;
+    e.preventDefault();dragDepth.current=0;setDragging(false);
+    if(busy)return;
+    if(e.dataTransfer.files.length>1){setError('Drop one PDF or ZIP at a time.');return;}
+    uploadPlan(e.dataTransfer.files[0]);
+  }}>
+    {dragging&&<div className="file-drop-overlay">Drop a {import.meta.env.MODE==='netlify'?'PDF or ZIP':'PDF'} to open plans</div>}
     <header>
       <div className="brand"><strong>A2Z</strong><span>Takeoff Desk</span></div>
       <span className="sandbox-label">LOCAL SANDBOX</span>
@@ -327,9 +389,7 @@ function App() {
         </select>}
         <input ref={upload} data-testid="upload" type="file" accept={import.meta.env.MODE==='netlify' ? ".pdf,.zip,application/pdf,application/zip" : ".pdf,application/pdf"} hidden onChange={e=>{
           const file=e.target.files?.[0];e.target.value='';
-          if (!file) return;
-          const data=new FormData();data.set('file',file);
-          void open('/api/projects',{method:'POST',body:data});
+          uploadPlan(file);
         }}/>
         <button onClick={()=>upload.current?.click()} disabled={!!busy}>{import.meta.env.MODE==='netlify'?'Upload PDF / ZIP':'Upload PDF'}</button>
         <button onClick={()=>void open('/api/sample',{method:'POST'})} disabled={!!busy}>Open sample</button>
@@ -365,10 +425,17 @@ function App() {
       <main className="workspace">
         <fieldset className="panel sidebar" disabled={!!busy}>
           <h2>Sheets</h2>
+          <label className="sheet-filter">Filter sheets
+            <select value={sheetFilter} onChange={e=>setSheetFilter(e.target.value as typeof sheetFilter)}>
+              <option value="all">All sheets</option><option value="demo">Demolition</option>
+              {scopeKeys.map(key=><option key={key} value={key}>{scopes[key][0]}</option>)}
+            </select>
+          </label>
           <nav className="sheet-list" aria-label="Sheets">
-            {project.sheets.map((s,i)=><button key={i} className={i===sheet?'active':''} onClick={()=>changeSheet(i)}>
-              <span>{s.name}</span><small>{state.scales[i]?'Calibrated':'Uncalibrated'}{state.notes[i]?' · Scanned':''}</small>
+            {filteredSheets.map(({view:s,index:i})=><button key={i} className={`${i===sheet?'active':''} ${sheetMatches(s.name,'demo')?'demo-sheet':''}`} onClick={()=>changeSheet(i)}>
+              <span>{s.name}</span><small>{state.scales[i]?'Calibrated':'Uncalibrated'}{state.notes[i]?' · Scanned':''}{sheetMatches(s.name,'demo')?' · Demo':''}</small>
             </button>)}
+            {!filteredSheets.length&&<p>No matching sheets.</p>}
           </nav>
           <h2>Scope layers</h2>
           {scopeKeys.map(key=><div className={`layer-row ${scope===key?'chosen':''}`} key={key}>
@@ -429,7 +496,7 @@ function App() {
         <fieldset className="panel inspector" disabled={!!busy}>
           <h2>Takeoff review</h2>
           <div className="review-counts"><span>{approved} approved</span><span>{review} in review</span></div>
-          <div className="scale-status">{cal ? `${quantity(cal.feet)} ft calibration · ${cal.source}` : 'Sheet scale required for lengths and areas'}</div>
+          <div className="scale-status">{cal ? cal.source.startsWith('Printed scale:')?cal.source:`${quantity(cal.feet)} ft calibration · ${cal.source}` : 'Sheet scale required for lengths and areas'}</div>
           <div className="takeoff-review-controls">
             <label className="inline"><input type="checkbox" checked={reviewOnly} onChange={e=>setReviewOnly(e.target.checked)}/> Needs review only</label>
             <button disabled={!localItems.some(i=>i.status==='review'&&measure(i,cal))} onClick={()=>{
@@ -523,7 +590,7 @@ function App() {
       </main>
     </> : <main className="empty"><div>
       <h1>Construction takeoff</h1>
-      <p>Upload a multipage PDF to calibrate sheets, trace demolition scope, and review draft pricing.</p>
+      <p>Drop a {import.meta.env.MODE==='netlify'?'PDF or ZIP':'PDF'} here, or choose a local file.</p>
       <button className="primary" disabled={!!busy} onClick={()=>upload.current?.click()}>Choose local PDF</button>
     </div></main>}
     <footer><span>{project ? `Revision ${state.revision}${dirty?' · Unsaved changes':''}` : 'Local project storage'}</span>

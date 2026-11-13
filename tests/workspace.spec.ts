@@ -198,3 +198,22 @@ test('standard legend finds non-wall geometry and keeps identical types the same
   await page.getByRole('button',{name:'Run sheet takeoff'}).click();
   await expect(page.getByRole('status')).toHaveText('0 added for review, 5 already present.');
 });
+
+test('local files can be dropped onto the workspace',async({page})=>{
+  await page.goto('/');
+  const hosted=await page.locator('html[data-hosted]').count();
+  if(hosted){
+    await page.getByLabel('Passcode').fill('local-browser-test-only');
+    await page.getByRole('button',{name:'Unlock'}).click();
+  }
+  await page.getByRole('button',{name:'Open sample'}).waitFor();
+  const bytes=readFileSync('samples/interior-demo.pdf').toString('base64');
+  await page.locator('.app').evaluate((app,data)=>{
+    const content=Uint8Array.from(atob(data),c=>c.charCodeAt(0));
+    const transfer=new DataTransfer();
+    transfer.items.add(new File([content],'dropped-plan.pdf',{type:'application/pdf'}));
+    app.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));
+  },bytes);
+  await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(4);
+  await expect(page.getByRole('combobox',{name:'Open saved project'}).locator('option:checked')).toHaveText('dropped-plan.pdf');
+});

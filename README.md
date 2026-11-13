@@ -79,3 +79,9 @@ Worker results cross to the UI in batches of up to 32. The raster scan compares 
 **Run all sheets** scans every sheet and reports matched sheets, new candidates, duplicates, and any extraction failures. Open each matching sheet to review its measurements. Length and area quantities require a verified calibration for that sheet. Selecting a scope immediately activates its compatible drawing tool (Line, Polygon, or Count). The assigned-scope control supports reclassification between scopes that share the measurement's geometry type.
 
 The hatch detector proposes approximate ceiling, flooring, or slab area outlines when it can match the spacing, direction, and color of a repeated vector hatch to an explicit demolition-area legend. Verify the outlines, openings, and measurements before approval. Unsupported scope requires manual measurement or a verified markup rule. To rerun the private Pine Street regression, set `A2Z_PINE_ZIP` to the path of the supplied ZIP and run the hosted browser tests.
+
+### Drop plans, filter sheets, and detect scale
+
+Drop one local PDF or ZIP onto the workspace. ZIP files use the hosted browser import path. Use **Filter sheets** to find demolition plans or a specific takeoff scope. Demo titles have an orange marker. Scope filters use sheet titles, recognized labels from sheets examined this session, and takeoff geometry. Run all sheets to collect labels and candidates across the set.
+
+The hosted detector automatically sets the sheet scale from a single supported architectural scale caption next to a plan title, or from one tagged scale bar. It displays the source and preserves a scale already set on the sheet, including manual calibration. Multiple scale captions, unsupported scale notation, and missing captions require manual calibration. Check detected scales against a known dimension when working with resized or reprinted PDFs.

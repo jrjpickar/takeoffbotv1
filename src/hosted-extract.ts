@@ -1,3 +1,4 @@
+import { printedScale } from './sheet-scale';
 import * as pdf from 'mupdf';
 import { hatchAreas } from './hatch-areas';
 import { demolitionLegend } from './legend-scope';
@@ -110,24 +111,39 @@ async function extractSheet(id:string,file:Blob,index:number) {
     return {paths,labels,annotations,raster:rasterCoverage>=(x1-x0)*(y1-y0)*.5,width:x1-x0,height:y1-y0};
   }finally{device.destroy();page.destroy();}
 }
+function detectedScale({annotations,labels,width,height}:Pick<Awaited<ReturnType<typeof extractSheet>>,
+  'annotations'|'labels'|'width'|'height'>) {
+  const bars=annotations.flatMap(a=>{
+    const m=bar.exec(a.text);
+    return m && a.type==='Line' && a.points.length===2 && distance(a.points[0],a.points[1])>0 && Number(m[1])>0 ?
+      [{points:a.points as [Point,Point],feet:Number(m[1]),source:`Scale bar xref ${a.xref}`}] : [];
+  });
+  return {scale:bars.length===1?bars[0]:bars.length===0?printedScale(labels,width,height):undefined,
+    multipleBars:bars.length>1};
+}
+function detectedScopes(labels:Awaited<ReturnType<typeof extractSheet>>['labels']) {
+  return [...new Set(labels.flatMap(label=>{
+    const text=label.text.replace(/^\(E\)\s*/i,'');
+    const scope=demolitionLegend(text)??(/ceiling (?:partial )?demolition area/i.test(text)?'ceiling':undefined);
+    return scope?[scope]:[];
+  }))];
+}
 export async function vectors(id:string,file:Blob,index:number) {
   const data=await extract(id,file,index);
-  return {paths:data.paths.filter(p=>p.paint==='stroke').map(({color,dashed,items})=>({color:color||null,dashed,items}))};
+  const scale=detectedScale(data).scale;
+  const scopeHints=detectedScopes(data.labels);
+  return {scale,scopeHints,paths:data.paths.filter(p=>p.paint==='stroke').map(({color,dashed,items})=>({color:color||null,dashed,items}))};
 }
 
 export async function run(id:string,file:Blob,index:number,input:{calibration?:Calibration;rules:Rule[]},
   send:(kind:string,data:unknown)=>void) {
   const {paths,labels,annotations,raster,width,height}=await extract(id,file,index);
   const warnings:string[]=[], marks=new Set<string>();
-  const bars=annotations.flatMap(a=>{
-    const m=bar.exec(a.text);
-    return m && a.type==='Line' && a.points.length===2 && distance(a.points[0],a.points[1])>0 && Number(m[1])>0 ?
-      [{points:a.points as [Point,Point],feet:Number(m[1]),source:`Scale bar xref ${a.xref}`}] : [];
-  });
-  const calibration=input.calibration ?? (bars.length===1?bars[0]:undefined);
-  if(calibration&&!input.calibration) send('scale',calibration);
-
-  if(bars.length>1) warnings.push('Multiple tagged scale bars. Confirm scale manually.');
+  send('scopeHints',detectedScopes(labels));
+  const detected=detectedScale({annotations,labels,width,height});
+  const calibration=input.calibration??detected.scale;
+  if(calibration&&!input.calibration)send('scale',calibration);
+  if(detected.multipleBars&&!input.calibration)warnings.push('Multiple tagged scale bars. Confirm scale manually.');
   function emit(scope:Scope, tool:Item['tool'], points:Point[], source:string, key:string, thickness:number|null) {
     const item:Item={id:`auto-${index}-${key}`,sheet:index,scope,tool,points,source,thickness,status:'review',edited:false};
     if(points.some(([x,y])=>x<0||y<0||x>width+.001||y>height+.001) ||

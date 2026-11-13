@@ -117,3 +117,7 @@ footer{background:var(--dm-surface-2);border-top:1px solid var(--dm-border);disp
 .review-question,.scope-review-line{padding:8px 0;border-bottom:1px solid var(--dm-border)}
 .review-picker input{width:62px}
 .review-question>button,.scope-review-line>button{font-size:11px;margin:5px 4px 0 0}
+
+.file-drop-overlay{position:fixed;z-index:30;inset:12px;display:grid;place-items:center;pointer-events:none;border:2px dashed var(--dm-accent);border-radius:10px;background:#141210d9;color:var(--dm-accent-strong);font-size:22px;font-weight:700}
+.sheet-filter{display:grid;gap:5px;margin-bottom:8px;font-size:12px}
+.sheet-list .demo-sheet{border-inline-start:3px solid var(--dm-accent)}

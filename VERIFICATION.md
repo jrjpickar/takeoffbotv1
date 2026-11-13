@@ -63,3 +63,7 @@ The hosted regression uses an ordinary vector demolition legend with filled and 
 ## Whole-plan Pine Street audit
 
 The supplied ZIP contains the same 44-sheet PDF as the earlier Pine Street attachment. The detector completed all 44 sheets. Two produced candidates: 26 wall segments on A-1.01 and six ceiling polygons on A-1.04. The ceiling polygons had no overlapping area in the geometry union check. Their boundaries are approximated from hatch spacing and endpoints, so the totals are preliminary. The check does not establish coverage of all demolition scope or field-verified accuracy. M01.01 mechanical demolition still requires manual verification of duct runs, disconnect points, and associated devices. Door swings, cubicles, and scope shown only in notes also need review. The private plan is excluded from the patch.
+
+## Plan navigation and automatic scale
+
+The hosted browser tests exercise dropping local plans, filtering the Pine Street sheet list to its two demolition-titled plans, highlighting demolition sheets, filtering ceiling sheets, and automatically applying the printed 3/16-inch-to-one-foot scale on A-1.04. The six ceiling candidates display SF after the scale is applied. Title- and label-based filters are navigation aids, and takeoff coverage is still limited as described in the whole-plan audit.
