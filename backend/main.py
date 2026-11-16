@@ -16,7 +16,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .domain import Revision, SCOPES, quantities
+from .domain import Revision, SCOPES, unit_for, quantities
 from .extract import Run, process, read_sheet
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -98,7 +98,8 @@ def csv_for(p, state):
     for item in state.items:
         if item.status != "approved":
             continue
-        name, unit, _ = SCOPES[item.scope]
+        name = SCOPES[item.scope][0]
+        unit = unit_for(item)
         measured = measure(state, item)
         if item.scope == "grading" and "CY" in measured:
             unit = "CY"

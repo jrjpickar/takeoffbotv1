@@ -7,6 +7,7 @@ const labels: [Scope, string][] = [
   ['slab','(?:concrete )?(?:slabs?|slab on grade)'],
   ['door','doors?(?: and frames)?'],
   ['fixture','(?:plumbing )?fixtures?|sinks?|toilets?|urinals?'],
+  ['blind','(?:window )?blinds?'],
   ['millwork','millwork|casework|cabinetry'],
 ];
 const action='(?:remove|demo(?:lish)?)';

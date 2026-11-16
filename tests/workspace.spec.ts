@@ -102,7 +102,7 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await clickPlan(page,165,80);
   await page.getByLabel('Known distance (ft)').fill('10');
   await page.getByRole('button',{name:'Apply scale'}).click();
-  await page.getByRole('button',{name:/Flooring SF/}).click();
+  await page.getByLabel('Takeoff scope').selectOption('floor');
   await page.getByRole('button',{name:'Rectangle',exact:true}).click();
   await clickPlan(page,60,150);
   await clickPlan(page,180,246);
@@ -146,7 +146,7 @@ test('draw remaining tools and move a count on the original plan',async({page})=
   await page.getByRole('button',{name:'Finish trace'}).click();
   await expect(page.getByRole('button',{name:/Interior walls review.*manual.*LF/})).toHaveCount(2);
 
-  await page.getByRole('button',{name:/Flooring SF/}).click();
+  await page.getByLabel('Takeoff scope').selectOption('floor');
   await page.getByRole('button',{name:'Polygon',exact:true}).click();
   await clickPlan(page,560,315);
   await clickPlan(page,680,315);
@@ -154,7 +154,7 @@ test('draw remaining tools and move a count on the original plan',async({page})=
   await page.getByRole('button',{name:'Finish trace'}).click();
   await expect(page.getByRole('button',{name:/Flooring review.*manual.*SF/})).toBeVisible();
 
-  await page.getByRole('button',{name:/Doors EA/}).click();
+  await page.getByLabel('Takeoff scope').selectOption('door');
   await page.getByRole('button',{name:'Count',exact:true}).click();
   await clickPlan(page,205,275);
   const count=page.getByRole('button',{name:/Doors review.*manual.*1 EA/});

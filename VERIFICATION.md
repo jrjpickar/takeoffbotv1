@@ -34,7 +34,7 @@ The supplied archive included a Desk CSV fixture and plan-text fixture. It did n
 ## Limits and production work
 
 - Validate on actual A2Z demolition plan sets with estimator-marked ground truth before relying on automated coverage. Calibrate each sheet and confirm plan revisions, viewport scale and demolition legends. Mixed-scale views need separate calibrated sheets or projects. There is no title-block scale inference.
-- Ordinary untagged monochrome drawings may require mostly manual takeoff. Dense hatching, curves, arcs, islands, holes, overlapping strokes, stacked plan views, complex symbols, and repeated details need estimator review. The engine does not infer quantities from notes or resolve leaders, automatically subtract holes, or detect partial overlaps between measurements.
+- Ordinary untagged monochrome drawings may require mostly manual takeoff. Dense hatching, curves, arcs, islands, holes, overlapping strokes, stacked plan views, complex symbols, and repeated details need estimator review. Automatic leader matching is limited to supported keyed CAD conventions. Holes and partial overlaps require review.
 - The viewer supports one PDF per project. Overlay editing uses existing vertices and compatible scope types. Use manual retracing when the shape or unit needs to change. Cross-sheet and cross-project revisions and overlap reconciliation need production design.
 - Confirm export names, units and upload behavior with the current Desk in staging. Map project IDs, plan versions, approvals, question answers, and cost worksheet/proposal handoff before wiring the adapter. Agree on whether slab CY should affect disposal pricing and how to prevent double charging. Refresh rates through a controlled snapshot.
 - Add production authentication, access controls, file screening, durable storage and backups, PDF parser isolation, processing limits, and browser/performance testing on large drawing sets. No production code, credentials, endpoints, GHL, Make, or deployment were changed.
@@ -75,3 +75,23 @@ The engine scanned all 48 sheets in the supplied Tustin PDF. Sheet D-1.0 produce
 ### Large-file and grading verification
 
 Chromium opened, rendered and ran takeoff on a 1,073,741,809-byte sparse four-page PDF. The test exercised the tab-only fallback when browser storage quota was insufficient. This fixture checks the file-size path, not rendering speed for a dense plan set. A vector grading fixture returned 100 SF and 3.7 CY at 12 inches of verified average depth. The detector scanned all nine supplied Thousand Oaks plumbing sheets and returned zero grading items. No verified grading boundary was present in those sheets. Actual contour-based earthwork and large ZIPs at the size limit remain unverified.
+
+### D-1.0 demolition quantities
+
+The hosted detector matches dashed door swings against the removal legend, checks keyed vector leaders for specific removal work, and sends each candidate to the existing review workflow. Millwork polygons export in SF. Existing millwork line measurements export in LF. Blinds export in LF. The Python sandbox retains its own extraction rules and accepts the new measurement scope and units.
+
+The D-1.0 baseline was 23 line candidates totaling 141.62 LF at 1/4 inch per foot. The revised hosted run produced the following review quantities before edits or approval. Compare the STACK **Takeoff Quantity** and **Takeoff Unit** fields.
+
+| Removal scope | STACK | Baseline | Revised | Revised minus STACK |
+|---|---:|---:|---:|---:|
+| Walls (LF) | 186.78 | 141.62 | 144.91 | -41.87 |
+| Doors (EA) | 20 | 0 | 17 | -3 |
+| Millwork (SF) | 293.67 | 0 | 109.97 | -183.70 |
+| Plumbing fixtures (EA) | 7 | 0 | 5 | -2 |
+| Blinds (LF) | 51.05 | 0 | 58.62 | +7.57 |
+
+Inspect interrupted partitions and the retained column at the east partition. Confirm the vault frame and restroom stall-door counts. The millwork total covers the keyed counter perimeter. Review unkeyed casework individually. The fixture candidates cover two lavatories, two water closets, and the sink called out for removal. Review additional symbols in the restrooms. The glazing callouts identify about 51.05 LF and 7.56 LF separately. Confirm both against the estimate scope. Floor and ceiling coverage was unscored.
+
+For local hosted regression, set `A2Z_TUSTIN_PDF` to the private plan, run `npm ci` and `npm run build:netlify`, then run `npx playwright test --config playwright.netlify.config.ts tests/tustin-plan.spec.ts`. The test expects detector output, while the table above scores it against STACK. Use an estimator-verified marked plan for object-by-object scoring.
+
+To deploy, overlay the patch files at the repository root, commit, and deploy through the existing Netlify site. The checked-in Netlify configuration runs `npm run build:netlify`, publishes `dist`, and deploys the existing functions. Keep `ESTIMATING_BOT_PASSCODE` configured for the functions. After deployment, repeat the D-1.0 upload, run, approval and CSV checks in the browser. No live deployment was made for this patch.

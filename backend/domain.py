@@ -14,11 +14,12 @@ SCOPES = {
     "fixture": ("Remove plumbing fixtures", "EA", "#a12273"),
     "sawcut": ("Sawcut concrete", "LF", "#00767f"),
     "grading": ("Grading excavation", "SF", "#506833"),
+    "blind": ("Remove blinds", "LF", "#426a85"),
     "millwork": ("Remove millwork", "LF", "#775b38"),
 }
 Point = tuple[FiniteFloat, FiniteFloat]
 Tool = Literal["line", "polyline", "polygon", "rect", "count"]
-Scope = Literal["wall", "floor", "ceiling", "slab", "door", "fixture", "sawcut", "millwork", "grading"]
+Scope = Literal["wall", "floor", "ceiling", "slab", "door", "fixture", "sawcut", "millwork", "grading", "blind"]
 
 class Measurement(BaseModel):
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
@@ -57,8 +58,13 @@ class Revision(BaseModel):
     rules: dict[int, list[StyleRule]] = Field(default_factory=dict)
     markup: FiniteFloat | None = Field(default=None, ge=0)
 
+def unit_for(item):
+    if item.scope == "millwork" and item.tool in {"polygon", "rect"}:
+        return "SF"
+    return SCOPES[item.scope][1]
+
 def quantities(item, scale):
-    unit = SCOPES[item.scope][1]
+    unit = unit_for(item)
     points = item.points
     if unit == "EA" and item.tool == "count" and len(points) == 1:
         return {"EA": 1}

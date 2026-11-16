@@ -1,4 +1,4 @@
-import { measure, scopes, type Project, type State } from './domain';
+import { measure, scopes, unitFor, type Project, type State } from './domain';
 import { displaySheetName } from './sheet-labels';
 
 export function planSetCsv(project:Project,state:State){
@@ -10,7 +10,7 @@ export function planSetCsv(project:Project,state:State){
     const result=measure(item,scale);
     rows.push([displaySheetName(sheet?.name??`Sheet ${item.sheet+1}`),item.sheet+1,scopes[item.scope][0],
       item.status==='review'?'In review':item.status==='approved'?'Approved':'Rejected',
-      result?Number(result.value.toFixed(6)):'',scopes[item.scope][1],
+      result?Number(result.value.toFixed(6)):'',unitFor(item.scope,item.tool),
       result?.cy===undefined?'':Number(result.cy.toFixed(6)),item.id,item.source,scale?.source??'']);
   }
   return '\uFEFF'+rows.map(row=>row.map(value=>{

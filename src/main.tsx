@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { Viewer } from './Viewer';
 import { type Calibration, type Item, type Mode, type Point, type Price, type Project,
   type Rule, type Scope, type State, type Tool, currency, deskNames, distance, factor, json, measure,
-  quantity, request, scopeColor, scopeKeys, scopes, toolsFor } from './domain';
+  quantity, request, scopeColor, scopeKeys, scopes, toolsFor, unitFor } from './domain';
 import './styles.css';
 
 const names: Record<Mode,string> = {
@@ -38,7 +38,7 @@ function sheetMatches(name:string, filter:Scope|'demo'|'all') {
     slab:/\b(?:concrete|slab)\b/i,
     door:/\b(?:doors?|openings)\b/i,
     fixture:/\b(?:plumbing|fixtures?)\b/i,
-    sawcut:/\bsaw[ -]?cut/i,millwork:/\b(?:millwork|casework)\b/i,
+    blind:/\bblinds?\b/i, sawcut:/\bsaw[ -]?cut/i,millwork:/\b(?:millwork|casework)\b/i,
   };
   return cues[filter]?.test(name)??false;
 }
@@ -370,7 +370,7 @@ function App() {
     finally {setBusy('');}
   }
   const linkedScope=item && price?.scopeLines.flatMap(s=>s.lines)
-    .find(l=>l.key===`item:${deskNames[item.scope].toLowerCase()}|${scopes[item.scope][1]}`);
+    .find(l=>l.key===`item:${deskNames[item.scope].toLowerCase()}|${unitFor(item.scope,item.tool)}`);
   const approved=state.items.filter(i=>i.status==='approved').length;
   const review=state.items.filter(i=>i.status==='review').length;
   const instruction=mode==='calibrate' ? 'Click two points on a known dimension.' :
@@ -488,7 +488,7 @@ function App() {
             <input type="checkbox" aria-label={`Show ${scopes[key][0]}`} checked={!hidden.includes(key)}
               onChange={()=>setHidden(hidden.includes(key)?hidden.filter(s=>s!==key):[...hidden,key])}/>
             <button onClick={()=>changeScope(key)} aria-pressed={scope===key}>
-              <i style={{background:scopeColor(key,state.colors)}}/>{scopes[key][0]} <small>{scopes[key][1]}</small>
+              <i style={{background:scopeColor(key,state.colors)}}/>{scopes[key][0]} <small>{key==='millwork'?'LF / SF':scopes[key][1]}</small>
             </button>
             <input className="layer-color" type="color" aria-label={`${scopes[key][0]} takeoff color`}
               value={scopeColor(key,state.colors)} onChange={e=>commit({...state,
@@ -532,7 +532,7 @@ function App() {
           </div>
           <fieldset aria-label="Takeoff tools" className="canvas-tools" disabled={!!busy}>
             <select aria-label="Takeoff scope" value={scope} onChange={e=>changeScope(e.target.value as Scope)}>
-              {scopeKeys.map(key=><option key={key} value={key}>{scopes[key][0]} · {scopes[key][1]}</option>)}
+              {scopeKeys.map(key=><option key={key} value={key}>{scopes[key][0]} · {key==='millwork'?'LF / SF':scopes[key][1]}</option>)}
             </select>
         {(['select','pan','calibrate',...toolsFor(scope)] as Mode[]).map(m=><button key={m}
           aria-label={names[m]} className={mode===m?'active':''} title={m==='select'?'Select (V)':m==='pan'?'Pan (H)':m==='calibrate'?'Calibrate (S)':names[m]} aria-pressed={mode===m} onClick={()=>changeMode(m)}>{m==='polygon'?'Area':names[m]}</button>)}
@@ -575,11 +575,14 @@ function App() {
               const items=localItems.filter(i=>i.scope===key&&(!reviewOnly||i.status==='review'));
               if(!items.length)return null;
               const values=items.map(i=>({item:i,measurement:measure(i,cal)}));
-              const total=values.reduce((sum,{item,measurement})=>
-                sum+(item.status==='rejected'?0:measurement?.value??0),0);
+              const totals = new Map<string,number>();
+              for(const {item,measurement} of values){
+                if(item.status!=='rejected'&&measurement)
+                  totals.set(measurement.unit,(totals.get(measurement.unit)??0)+measurement.value);
+              }
               return <details key={key} open className="measurement-group">
                 <summary><i style={{background:scopeColor(key,state.colors)}}/> {scopes[key][0]} · {items.length}
-                  {total>0&&<b>{quantity(total)} {scopes[key][1]}</b>}</summary>
+                  {totals.size>0&&<b>{[...totals].map(([unit,total])=>`${quantity(total)} ${unit}`).join(' · ')}</b>}</summary>
                 <div className="measurement-group-items">{values.map(({item:i,measurement:m})=>
                   <button key={i.id} className={i.id===selected?'active':''} onClick={()=>{
                 setSelected(i.id);setHidden(hidden.filter(s=>s!==i.scope));changeMode('select');
@@ -618,9 +621,12 @@ function App() {
             {scopeKeys.map(k=>{
               const values=state.items.filter(i=>i.scope===k && i.status==='approved')
                 .map(i=>measure(i,state.scales[i.sheet]));
-              const total=values.reduce((a,b)=>a+(b?.value??0),0);
+              const totals = new Map<string,number>();
+              for(const value of values){
+                if(value)totals.set(value.unit,(totals.get(value.unit)??0)+value.value);
+              }
               const cy=values.reduce((a,b)=>a+(b?.cy??0),0);
-              return total>0 && <div key={k}><span>{scopes[k][0]}</span><b>{quantity(total)} {scopes[k][1]}{cy>0?` · ${quantity(cy)} CY`:''}</b></div>;
+              return totals.size>0 && <div key={k}><span>{scopes[k][0]}</span><b>{[...totals].map(([unit,total])=>`${quantity(total)} ${unit}`).join(' · ')}{cy>0?` · ${quantity(cy)} CY`:''}</b></div>;
             })}
             {!approved && <p>Approve measurements to include them.</p>}
           </details>
@@ -640,7 +646,7 @@ function App() {
                 if(value)answers[key]=value;else delete answers[key];
                 commit({...state,answers});
               }} jump={key=>{
-                const target=state.items.find(i=>i.status==='approved'&&key===`item:${deskNames[i.scope].toLowerCase()}|${scopes[i.scope][1]}`);
+                const target=state.items.find(i=>i.status==='approved'&&key===`item:${deskNames[i.scope].toLowerCase()}|${unitFor(i.scope,i.tool)}`);
                 if(target){changeSheet(target.sheet);setSelected(target.id);setHidden(hidden.filter(s=>s!==target.scope));changeMode('select');}
               }}/>
               <div className="cost-line"><span>Direct cost</span><b>{currency(price.cost)}</b></div>

@@ -9,6 +9,7 @@ export const scopes = {
   sawcut: ['Sawcutting', 'LF', '#007b84'],
   grading: ['Grading area', 'SF', '#506833'],
   millwork: ['Millwork', 'LF', '#755334'],
+  blind: ['Blinds', 'LF', '#426a85'],
 } as const;
 export type Scope = keyof typeof scopes;
 export type Tool = 'line' | 'polyline' | 'polygon' | 'rect' | 'count';
@@ -32,7 +33,7 @@ export interface Rule { scope: Scope; color: string; dashed: boolean }
 export const deskNames: Record<Scope,string> = {
   wall:'Demo interior stud walls', floor:'Remove flooring', ceiling:'Demo ceiling',
   slab:'Remove concrete slab', door:'Remove doors', fixture:'Remove plumbing fixtures',
-  sawcut:'Sawcut concrete', grading:'Grading excavation', millwork:'Remove millwork',
+  sawcut:'Sawcut concrete', grading:'Grading excavation', millwork:'Remove millwork', blind:'Remove blinds',
 };
 export interface PriceQuestion {
   key:string; title:string; detail?:string; tag:string; open:boolean;
@@ -54,6 +55,7 @@ export const distance = (a: Point, b: Point) => Math.hypot(a[0]-b[0], a[1]-b[1])
 export const factor = (scale?: Calibration) => scale && scale.feet / distance(...scale.points);
 export const scopeKeys = Object.keys(scopes) as Scope[];
 export const toolsFor = (scope: Scope): Tool[] => {
+  if (scope === 'millwork') return ['line','polyline','polygon','rect'];
   const unit = scopes[scope][1];
   return unit === 'LF' ? ['line', 'polyline'] : unit === 'SF' ? ['polygon','rect'] : ['count'];
 };
@@ -80,8 +82,11 @@ function area(points: Point[]) {
   }
   return Math.abs(total)/2;
 }
+export const unitFor = (scope:Scope,tool:Tool) =>
+  scope==='millwork'&&(tool==='polygon'||tool==='rect')?'SF':scopes[scope][1];
+
 export function measure(item: Item, scale?: Calibration) {
-  const unit = scopes[item.scope][1], p = item.points, f = factor(scale);
+  const unit = unitFor(item.scope,item.tool), p = item.points, f = factor(scale);
   if (!toolsFor(item.scope).includes(item.tool)) return null;
   if (unit === 'EA') return p.length === 1 ? { value: 1, unit } : null;
   if (!f || !Number.isFinite(f)) return null;

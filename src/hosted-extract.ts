@@ -1,3 +1,4 @@
+import { keyedDemolition } from './keyed-demolition';
 import { cadDemoTitle, cadLayer, cadWallRuns } from './cad-demolition';
 import { dashedPartitions } from './dashed-partitions';
 import { decodeSheetLabel, sheetIdentity } from './sheet-labels';
@@ -6,7 +7,7 @@ import * as pdf from 'mupdf';
 import { hatchAreas } from './hatch-areas';
 import { demolitionLegend } from './legend-scope';
 import { wallPairs } from './raster-walls';
-import { distance, measure, scopes, type Calibration, type Item, type Point, type Rule, type Scope, type Sheet } from './domain';
+import { distance, factor, measure, scopes, type Calibration, type Item, type Point, type Rule, type Scope, type Sheet } from './domain';
 
 type Stroke = {layer?:string;width:number;paint:'stroke'|'fill';color:string; dashed:boolean; seq:number; items:[string,Point[]][]; points:Point[];
   closed:boolean; simple:boolean; bounds:pdf.Rect};
@@ -237,6 +238,9 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     if(scope&&tool)emit(scope,tool,a.points,`Tagged annotation xref ${a.xref}`,`a${a.xref}`,Number(match?.[2])||null);
     else if(/^A2Z TAKEOFF:/i.test(a.text))warnings.push(`Annotation xref ${a.xref}: unsupported geometry or scope tag.`);
   }
+  const foot = factor(detected.scale??input.calibration);
+  const keyed = foot&&!raster ? keyedDemolition(paths,labels,1/foot) : undefined;
+  const keyedDoors=keyed?.candidates.some(mark=>mark.scope==='door');
   const styles=new Map<string,Map<string,{scope:Scope;thickness:number|null}>>();
   const swatches=new Set<number>();
   const map=(color:string,dashed:boolean,scope:Scope,thickness:number|null,paint:Stroke['paint']='stroke')=>{
@@ -251,6 +255,7 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     const match=legend.exec(label.text);
     const scope=match?scopeOf(match[1]):demolitionLegend(label.text);
     if(!scope)continue;
+    if(!match&&scope==='door'&&keyedDoors)continue;
     if(!match&&scope==='grading'&&!labels.some(l=>/\b(?:grading|earthwork|excavation) (?:plan|legend)\b/i.test(l.text)))continue;
     if(!match&&raster&&scope==='wall')continue;
     const [left,top,,bottom]=label.bounds;
@@ -302,6 +307,13 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     for(const [i,points] of partitions.entries())emit('wall','line',points,
       'Paired dashed removal outlines · verify partition and endpoints',`d${i}`,null);
     if(partitions.length)warnings.push('Dashed partition lengths are review candidates. Verify endpoints, doors, finishes, and note-based removals separately.');
+  }
+  if(keyed){
+    for(const mark of keyed.candidates){
+      if(!input.rules.some(rule=>rule.scope===mark.scope))
+        emit(mark.scope,mark.tool,mark.points,mark.source,mark.key,null);
+    }
+    warnings.push(...keyed.warnings);
   }
   const hatchScopes = new Map<Scope,typeof labels[number]>();
   for(const label of labels){

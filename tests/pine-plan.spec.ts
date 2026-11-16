@@ -31,6 +31,7 @@ test('Pine ZIP imports and produces wall candidates',async({page})=>{
   await page.getByRole('button',{name:'Run sheet takeoff'}).click();
   await expect(page.getByRole('status')).toHaveText('0 added for review, 26 already present.');
   await expect(rows.first()).toContainText('LF');
+  await page.getByRole('button',{name:'Takeoffs',exact:true}).click();
   await page.getByLabel('Interior walls takeoff color').fill('#0055ff');
   await expect(rows.first().locator('i')).toHaveCSS('background-color','rgb(0, 85, 255)');
   page.once('dialog',d=>d.accept());
@@ -48,7 +49,7 @@ test('Pine ZIP imports and produces wall candidates',async({page})=>{
   const viewer=page.getByTestId('viewer');
   await viewer.hover();
   await page.mouse.wheel(0,-160);
-  await expect(page.getByRole('button',{name:'149%'})).toBeVisible();
+  await expect(page.locator('.canvas-nav').getByText('149%',{exact:true})).toBeVisible();
   await page.mouse.wheel(0,-160);
   const view=await viewer.boundingBox();
   if(!view)throw new Error('Missing viewer');
@@ -60,7 +61,7 @@ test('Pine ZIP imports and produces wall candidates',async({page})=>{
   await page.mouse.up();await page.keyboard.up('Space');
   expect(await viewer.evaluate(el=>el.scrollLeft)).toBeGreaterThan(before);
   await page.mouse.wheel(0,160);
-  await expect(page.getByRole('button',{name:'149%'})).toBeVisible();
+  await expect(page.locator('.canvas-nav').getByText('149%',{exact:true})).toBeVisible();
 });
 
 test('Pine ceiling hatch and switching scopes',async({page})=>{
@@ -91,10 +92,10 @@ test('Pine ceiling hatch and switching scopes',async({page})=>{
   expect(csv).toContain('A-1.01 - DEMOLITION PLAN,10,Interior walls,In review');
   expect(csv).toContain('A-1.04 - EXISTING REFLECTED CEILING PLAN,13,Ceilings,In review');
 
-  await page.getByRole('button',{name:'Ceilings SF',exact:true}).click();
+  await page.getByLabel('Takeoff scope').selectOption('ceiling');
   await expect(page.getByRole('button',{name:'Polygon',exact:true})).toHaveAttribute('aria-pressed','true');
-  await page.getByRole('button',{name:'Doors EA',exact:true}).click();
+  await page.getByLabel('Takeoff scope').selectOption('door');
   await expect(page.getByRole('button',{name:'Count',exact:true})).toHaveAttribute('aria-pressed','true');
-  await page.getByRole('button',{name:'Interior walls LF',exact:true}).click();
+  await page.getByLabel('Takeoff scope').selectOption('wall');
   await expect(page.getByRole('button',{name:'Line',exact:true})).toHaveAttribute('aria-pressed','true');
 });
