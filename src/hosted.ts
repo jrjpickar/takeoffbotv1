@@ -1,5 +1,5 @@
 import { planFiles } from './plan-files';
-import { measure, factor, deskNames, type Project, type State, type Sheet } from './domain';
+import { measure, factor, deskNames, type Project, type State, type Sheet, type Point } from './domain';
 import sample from '../samples/interior-demo.pdf?url';
 
 type Stored = Omit<Project,'state'> & {file?:Blob; diskName?:string; revisions:State[]};
@@ -239,4 +239,9 @@ export async function previewPlan<T>(root:string,index:number,signal:AbortSignal
 
 export function renderLargePlan(path:string,file:Blob,index:number,scale:number,signal?:AbortSignal) {
   return extract<Blob>({action:'render',id:path.split('/')[3],file,index,scale},signal);
+}
+
+export async function keynoteCrop(root:string,index:number,region:[Point,Point]) {
+  const file=await hostedPlanBlob(root+'/pdf');
+  return extract<Blob>({action:'keynote-crop',id:root.split('/')[3],file,index,region});
 }

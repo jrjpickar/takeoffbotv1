@@ -9,11 +9,20 @@ export function cadDemoTitle(layers:string[]){
   if(floor!==ceiling)return floor?'Demolition Floor Plan':'Demolition Ceiling Plan';
 }
 
-export function cadWallRuns(paths:{layer?:string;paint:string;simple:boolean;points:Point[]}[]){
+type WallStroke = {layer?:string;paint:string;simple:boolean;width:number;points:Point[]};
+
+export function hasOutlinedDemoPlan(paths:WallStroke[],labels:{text:string}[]){
+  return labels.some(({text})=>/^DEMOLITION PLAN\s*\/\s*NOTES\s*\/\s*DETAILS$/i.test(text.trim())) &&
+    paths.some(path=>path.layer==='A-WALL-EXST') &&
+    paths.some(path=>path.layer==='DEMO'&&path.width===.15);
+}
+
+export function cadWallRuns(paths:WallStroke[],profile:'standard'|'outlined'='standard'){
   // This CAD export draws the wall edges as individual dash segments.
   const groups=new Map<string,{vertical:boolean;at:number;segments:[number,number][]}>();
   for(const path of paths){
-    if(path.layer!=='A-DEMO'||path.paint!=='stroke'||!path.simple)continue;
+    if(path.paint!=='stroke'||!path.simple)continue;
+    if(profile==='standard' ? path.layer!=='A-DEMO' : path.layer!=='DEMO'||path.width!==.15)continue;
     const points=path.points;
     for(let i=1;i<points.length;i++){
       const a=points[i-1],b=points[i];

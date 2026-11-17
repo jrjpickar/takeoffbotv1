@@ -15,6 +15,9 @@ const names: Record<Mode,string> = {
   select:'Select', pan:'Pan', calibrate:'Calibrate', line:'Line', polyline:'Polyline',
   polygon:'Polygon', rect:'Rectangle', count:'Count',
 };
+type KeynoteLabel = 'remove'|'remain'|'uncertain';
+const keynoteKey=(item:Item)=>JSON.stringify([item.id,item.scope,item.points]);
+type KeynoteDraft = {note:string;label?:KeynoteLabel};
 const unitExample: Record<Tool,string> = {
   line:'Click both endpoints.', polyline:'Click each vertex, then press Enter.',
   polygon:'Click each corner, then press Enter.', rect:'Click two opposite corners.', count:'Click one point per item.',
@@ -99,6 +102,8 @@ function App() {
   const [runColors,setRunColors]=useState<State['colors']>({});
   const [reviewOnly,setReviewOnly]=useState(false);
   const [selected,setSelected]=useState<string>();
+  const [keynoteTarget,setKeynoteTarget]=useState<string>();
+  const [keynoteDrafts,setKeynoteDrafts]=useState<Record<string,KeynoteDraft>>({});
   const [undo,setUndo]=useState<State[]>([]);
   const [redo,setRedo]=useState<State[]>([]);
   const [busy,setBusy]=useState('');
@@ -120,6 +125,11 @@ function App() {
   const localItems=useMemo(()=>state.items.filter(i=>i.sheet===sheet),[state.items,sheet]);
   const visible=useMemo(()=>localItems.filter(i=>!hidden.includes(i.scope)),[localItems,hidden]);
   const item=localItems.find(i=>i.id===selected);
+  const activeKeynote=item?keynoteDrafts[keynoteKey(item)]:undefined;
+  const keyedItems=localItems.filter(candidate=>{
+    const draft=keynoteDrafts[keynoteKey(candidate)];
+    return candidate.status==='review'&&draft?.note.trim()&&!draft.label;
+  });
   const vectors=useMemo(()=>extraction?.paths.flatMap(p=>p.items.flatMap(([kind,pts]) =>
     kind==='c' ? [pts[0],pts.at(-1)!] : pts)).slice(0,30000) ?? [],[extraction]);
   const styles=useMemo(()=>Array.from(new Map([...(extraction?.paths??[]),...additionalStyles].filter(p=>p.color)
@@ -198,7 +208,7 @@ function App() {
     setSelected(undefined);
   }
   function changeMode(m: Mode) {
-    setMode(m);setPending([]);setFeet('');setError('');
+    setMode(m);setPending([]);setFeet('');setError('');setKeynoteTarget(undefined);
   }
   function changeScope(s: Scope) {
     if(s===scope&&toolsFor(s).includes(mode as Tool))return;
@@ -215,7 +225,7 @@ function App() {
     try {
       let p=await (await request(endpoint,init)).json() as Project;
       if (!p.state) p=await (await request(`/api/projects/${p.id}`)).json();
-      setSheetSearch('');setSheetFilter('all');setSheetHints({});setProject(p);setState(p.state);setSaved(p.state);changeSheet(0);
+      setKeynoteDrafts({});setSheetSearch('');setSheetFilter('all');setSheetHints({});setProject(p);setState(p.state);setSaved(p.state);changeSheet(0);
       setUndo([]);setRedo([]);setZoom(1);setHidden([]);setSavedRevision('');
       setProjects(await (await request('/api/projects')).json());
     } catch(e) { report(e); }
@@ -239,12 +249,49 @@ function App() {
     commit({...state,items:[...state.items,candidate]});
     setPending([]);setSelected(candidate.id);setError('');
   }
+  async function readKeynoteCrop(key:string,region:[Point,Point]){
+    changeMode('pan');
+    setBusy('Reading keynote locally…');setNotice('');
+    try{
+      const [{keynoteCrop},{readKeynote}]=await Promise.all([import('./hosted'),import('./keynote-ocr')]);
+      const text=await readKeynote(await keynoteCrop(root,sheet,region));
+      if(!text)throw Error('No text found. Select a tighter area or paste the keynote.');
+      setKeynoteDrafts(prev=>({...prev,[key]:{note:text.slice(0,240)}}));
+      setNotice(text.length>240?'Read first 240 characters. Select a tighter crop or edit the excerpt.':'Check the extracted keynote before sending it.');
+    }catch(e){report(e);}
+    finally{setBusy('');}
+  }
+  async function checkKeynotes(){
+    const batch=keyedItems.map(item=>({key:keynoteKey(item),object:item.scope}));
+    const notes=batch.map(({key,object})=>({object,note:keynoteDrafts[key].note.trim()}));
+    if(!notes.length||notes.length>5||notes.reduce((sum,item)=>sum+item.note.length,0)>1000){
+      setError('Enter one to five short keynotes with at most 1,000 characters total.');return;
+    }
+    setBusy('Checking keynotes…');setNotice('');setError('');
+    try{
+      const response=await fetch('/.netlify/functions/keynote',json({notes}));
+      const data=await response.json();
+      if(!response.ok)throw Error(data.detail??'Keynote review is unavailable.');
+      if(!Array.isArray(data.labels)||data.labels.length!==batch.length||
+        data.labels.some((label:unknown)=>label!=='remove'&&label!=='remain'&&label!=='uncertain'))throw Error('Invalid keynote advice.');
+      setKeynoteDrafts(prev=>{
+        const next={...prev};
+        batch.forEach(({key},i)=>{if(next[key]?.note.trim()===notes[i].note)next[key]={...next[key],label:data.labels[i]};});
+        return next;
+      });
+      setNotice(`Keynote advice ready for ${batch.length} ${batch.length===1?'candidate':'candidates'}.`);
+    }catch(e){report(e);}
+    finally{setBusy('');}
+  }
   function addPoint(p: Point) {
     if (busy) return;
     if (mode==='select' || mode==='pan') return;
     if (mode==='count') { finish(mode,[p]);return; }
     if (mode==='calibrate' && pending.length>=2) return;
     const next=[...pending,p];
+    if(keynoteTarget&&next.length===2){
+      void readKeynoteCrop(keynoteTarget,next as [Point,Point]);return;
+    }
     if (mode==='calibrate' && next.length===2 && distance(...next as [Point,Point])===0) {
       setError('Choose two distinct calibration points.');return;
     }
@@ -264,7 +311,10 @@ function App() {
   useEffect(()=>{
     const key=(e:KeyboardEvent)=>{
       if (busy || (e.target instanceof HTMLElement && /INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))) return;
-      if (e.key==='Escape') {setPending([]);setSelected(undefined);}
+      if (e.key==='Escape') {
+        if(keynoteTarget)changeMode('pan');
+        else{setPending([]);setSelected(undefined);}
+      }
       if(project&&!e.metaKey&&!e.ctrlKey&&!e.altKey){
         const tool=({v:'select',h:'pan',s:'calibrate'} as Partial<Record<string,Mode>>)[e.key.toLowerCase()];
         if(tool)changeMode(tool);
@@ -297,7 +347,7 @@ function App() {
   }
   async function run(applyColors=false, allSheets=false, demoOnly=false) {
     setColorPrompt(false);
-    setBusy('Processing sheet…');setError('');setNotice('');setPending([]);setMode('pan');
+    setBusy('Processing sheet…');setNotice('');changeMode('pan');
     setUndo(prev=>[...prev.slice(-49),state]);setRedo([]);
     if(applyColors)setState(prev=>({...prev,colors:{...prev.colors,...runColors}}));
     const ids=new Set(state.items.map(i=>i.id));
@@ -384,7 +434,7 @@ function App() {
     .find(l=>l.key===`item:${deskNames[item.scope].toLowerCase()}|${unitFor(item.scope,item.tool)}`);
   const approved=state.items.filter(i=>i.status==='approved').length;
   const review=state.items.filter(i=>i.status==='review').length;
-  const instruction=mode==='calibrate' ? 'Click two points on a known dimension.' :
+  const instruction=keynoteTarget?'Click opposite corners around one keynote.':mode==='calibrate' ? 'Click two points on a known dimension.' :
     mode==='select' ? 'Select a measurement to move it or drag a vertex to resize.' :
     mode==='pan' ? 'Drag to pan the sheet.' : unitExample[mode];
 
@@ -561,7 +611,7 @@ function App() {
             <button onClick={()=>finish(mode,pending)}>Finish trace</button><button onClick={()=>setPending(pending.slice(0,-1))}>Remove last point</button>
           </div>}
           <Viewer colors={state.colors} key={project.id} url={root+'/pdf'} index={sheet} sheet={project.sheets[sheet]} items={visible}
-            calibration={cal} mode={busy ? 'pan' : mode} activeScope={scope} selected={busy ? undefined : selected} snap={snap}
+            calibration={cal} mode={busy ? 'pan' : mode} activeScope={scope} selected={busy ? undefined : selected} snap={snap&&!keynoteTarget}
             zoom={zoom} setZoom={setZoom} fitPage={fitPage} vertices={vectors} pending={pending} setPending={setPending} addPoint={addPoint}
             select={id=>{if(!busy){setSelected(id);if(id)setShowReview(true);}}} changePoints={(id,points)=>{
               const target=state.items.find(i=>i.id===id);
@@ -608,6 +658,26 @@ function App() {
             <h3>Selected measurement</h3>
             <small>{displaySheetName(project.sheets[sheet].name)} · {item.source}{item.edited?' · Edited':''}</small>
             {linkedScope && item.status==='approved' && <p>Desk scope · {linkedScope.text}</p>}
+            {import.meta.env.MODE==='netlify'&&item.status==='review'&&<details className="keynote-review" open={!!activeKeynote?.note||!!keynoteTarget||undefined}>
+              <summary>Keynote advice</summary>
+              <p>Choose the note that applies to this measurement. Check extracted text before sharing it with Groq.</p>
+              <button disabled={!!busy} onClick={()=>{
+                if(keynoteTarget){changeMode('pan');return;}
+                changeMode('rect');setKeynoteTarget(keynoteKey(item));
+              }}>{keynoteTarget?'Cancel keynote area':'Read keynote area'}</button>
+              <label>Keynote excerpt
+                <textarea rows={3} maxLength={240} disabled={!!busy}
+                  value={activeKeynote?.note??''}
+                  onChange={e=>{
+                    const note=e.target.value;
+                    setKeynoteDrafts(prev=>({...prev,[keynoteKey(item)]:{note}}));
+                  }}/>
+              </label>
+              {keyedItems.length>5&&<p>Clear an unsent excerpt to keep this batch at five notes.</p>}
+              <button disabled={!!busy||!!keynoteTarget||!keyedItems.length||keyedItems.length>5}
+                onClick={()=>void checkKeynotes()}>Send {keyedItems.length} {keyedItems.length===1?'note':'notes'} to Groq</button>
+              {activeKeynote?.label&&<p data-testid="keynote-advice">Groq suggestion: <strong>{activeKeynote.label}</strong>. Confirm on the plan.</p>}
+            </details>}
             <label>{scopes[item.scope][0]} color <input type="color" value={scopeColor(item.scope,state.colors)}
               onChange={e=>commit({...state,colors:{...state.colors,[item.scope]:e.target.value}})}/></label>
             <label>Assigned scope <select value={item.scope} onChange={e=>{

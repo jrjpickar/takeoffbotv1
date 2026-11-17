@@ -1,6 +1,6 @@
 import { VectorPoints } from './vector-points';
 import { keyedDemolition } from './keyed-demolition';
-import { cadDemoTitle, cadLayer, cadWallRuns } from './cad-demolition';
+import { cadDemoTitle, cadLayer, cadWallRuns, hasOutlinedDemoPlan } from './cad-demolition';
 import { dashedPartitions } from './dashed-partitions';
 import { decodeSheetLabel, sheetIdentity } from './sheet-labels';
 import { printedScale } from './sheet-scale';
@@ -424,6 +424,15 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
       'Paired wall edges on CAD A-DEMO layer · check limits against keyed notes',`cad-wall-${i}`,null);
     warn('CAD floor demo layers also contain fixtures, doors, finishes and relocation marks. Follow the keyed notes to measure these separately.');
   }
+  if(!raster&&demo!=='Demolition Floor Plan'&&!input.rules.some(rule=>rule.scope==='wall')&&hasOutlinedDemoPlan(paths,labels)){
+    const candidates=cadWallRuns(paths,'outlined');
+    for(const [i,points] of candidates.entries())emit('wall','line',points,
+      'Paired dashed wall edges on CAD DEMO layer · verify against demolition keynotes',`outlined-wall-${i}`,null);
+    if(candidates.length){
+      warn('CAD DEMO wall candidates: verify each run and its limits against the demolition keynotes. Doors, fixtures, and finishes need separate review.');
+      if(!calibration)warn('No readable printed scale was detected. Calibrate against a marked dimension before approving lengths.');
+    }
+  }
   if(demo==='Demolition Ceiling Plan')warn('CAD ceiling demo layer mixes removal boundaries with fixtures and relocation marks. Trace ceiling areas from the keyed notes.');
   const dashedLegend=labels.find(l=>/^EXISTING CONSTRUCTION TO BE REMOVED$/i.test(l.text));
   if(dashedLegend&&labels.some(l=>/^DEMO(?:LITION)? LEGEND$/i.test(l.text))&&
@@ -513,5 +522,32 @@ export async function renderLarge(id:string,file:Blob,index:number,scale:number)
     const pix=page.toPixmap(pdf.Matrix.scale(scale,scale),pdf.ColorSpace.DeviceRGB,false,true);
     try{return new Blob([pix.asPNG().buffer as ArrayBuffer],{type:'image/png'});}
     finally{pix.destroy();}
+  }finally{page.destroy();}
+}
+
+export async function renderKeynoteCrop(id:string,file:Blob,index:number,region:[Point,Point]){
+  const doc=await document(id,file);
+  selectSheet(index);
+  const page=doc.loadPage(index);
+  try{
+    const {x0,y0,x1,y1}=pageGeometry(page);
+    const [[ax,ay],[bx,by]]=region;
+    if(![ax,ay,bx,by].every(Number.isFinite))throw Error('Invalid keynote area.');
+    const left=Math.max(0,Math.min(ax,bx)),top=Math.max(0,Math.min(ay,by));
+    const right=Math.min(x1-x0,Math.max(ax,bx)),bottom=Math.min(y1-y0,Math.max(ay,by));
+    const width=right-left,height=bottom-top;
+    if(width<6||height<6||width>480||height>320)
+      throw Error('Select a tighter rectangle around one keynote.');
+    const scale=4;
+    const rect:pdf.Rect=[Math.floor((left+x0)*scale),Math.floor((top+y0)*scale),
+      Math.ceil((right+x0)*scale),Math.ceil((bottom+y0)*scale)];
+    const pixmap=new pdf.Pixmap(pdf.ColorSpace.DeviceGray,rect,false);
+    try{
+      pixmap.clear(255);
+      const device=new pdf.DrawDevice(pdf.Matrix.identity,pixmap);
+      try{page.runPageContents(device,pdf.Matrix.scale(scale,scale));device.close();}
+      finally{device.destroy();}
+      return new Blob([pixmap.asPNG().buffer as ArrayBuffer],{type:'image/png'});
+    }finally{pixmap.destroy();}
   }finally{page.destroy();}
 }

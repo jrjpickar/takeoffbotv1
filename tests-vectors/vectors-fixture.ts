@@ -78,6 +78,15 @@ async function pixel(blob:Blob,x:number,y:number){
   }finally{image.close();}
 }
 const api={
+  async outlinedCad(){
+    const file=document.querySelector('input')!.files![0];
+    const id='outlined-cad';
+    const results=await request('sheets',id,file);
+    const uncalibrated=cut(await request('run',id,file,18));
+    const adjacent=cut(await request('run',id,file,17));
+    const reopened=cut(await request('run',id,file,18));
+    return {count:result(results).length,uncalibrated,adjacent,reopened};
+  },
   async queuedPreviews(){
     const file=fixture([125000,0]);
     const events:string[]=[];

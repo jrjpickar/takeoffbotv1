@@ -66,3 +66,23 @@ test('supplied ZIP imports, extracts and renders all 105 sheets',async({page},in
   }));
   await info.attach('exact-plan-results',{body:JSON.stringify(r,null,2),contentType:'application/json'});
 });
+
+
+test('outlined CA11231 sheet D-1 yields CAD review lines without guessing its scale',async({page})=>{
+  const fixture=process.env.A2Z_CA11231_PDF;
+  test.skip(!fixture,'Set A2Z_CA11231_PDF to CA11231_Planset.pdf.');
+  test.setTimeout(120000);
+  await page.goto('/tests-vectors/vectors-fixture.html');
+  await page.getByLabel('Plan archive').setInputFiles(fixture!);
+  await page.waitForFunction(()=>!!window.vectorTest);
+  const r=await page.evaluate(()=>window.vectorTest.outlinedCad());
+  expect(r.count).toBe(53);
+  expect(r.uncalibrated.scale).toBeUndefined();
+  expect(r.uncalibrated.marks.filter((item:{source:string})=>item.source.includes('CAD DEMO layer')))
+    .toEqual([
+      expect.objectContaining({status:'review',scope:'wall',points:[[370.935,339.51],[370.935,501.51]]}),
+      expect.objectContaining({status:'review',scope:'wall',points:[[815.52,339.51],[815.52,460.17]]}),
+    ]);
+  expect(r.adjacent.marks.every((item:{source:string})=>!item.source.includes('CAD DEMO layer'))).toBe(true);
+  expect(r.reopened).toEqual(r.uncalibrated);
+});

@@ -162,3 +162,4 @@ footer{background:var(--dm-surface-2);border-top:1px solid var(--dm-border);disp
 .paper{overflow:hidden}
 .viewer-message{position:absolute;top:8px;left:12px}
 .inspector[hidden]{display:none}
+.keynote-review textarea{width:100%;box-sizing:border-box;resize:vertical;font:inherit;color:inherit;background:var(--dm-surface-2);border:1px solid var(--dm-border);border-radius:4px;padding:6px}

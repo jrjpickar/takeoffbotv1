@@ -1,6 +1,6 @@
 const engine = import('./hosted-extract');
 
-type Job = {job:number;action:string;id:string;file:Blob;index:number;input:Parameters<typeof import('./hosted-extract').run>[3];scale:number;progressive?:boolean};
+type Job = {job:number;action:string;id:string;file:Blob;index:number;input:Parameters<typeof import('./hosted-extract').run>[3];scale:number;region:Parameters<typeof import('./hosted-extract').renderKeynoteCrop>[3];progressive?:boolean};
 const queue:Job[]=[];
 let scheduled=false;
 let running=false;
@@ -27,10 +27,10 @@ self.onmessage=({data})=>{
   schedule();
 };
 
-async function execute({job,action,id,file,index,input,scale,progressive}:Job){
+async function execute({job,action,id,file,index,input,scale,region,progressive}:Job){
     const emit=(kind:string,data:unknown)=>self.postMessage({job,kind,data});
     try{
-      const {run,sheets,vectors,renderLarge}=await engine;
+      const {run,sheets,vectors,renderLarge,renderKeynoteCrop}=await engine;
       if(action==='run'){
         let batch:unknown[]=[];
         const flush=()=>{if(batch.length){emit('measurements',batch);batch=[];}};
@@ -42,6 +42,7 @@ async function execute({job,action,id,file,index,input,scale,progressive}:Job){
         });
         flush();
       }
+      else if(action==='keynote-crop')emit('result',await renderKeynoteCrop(id,file,index,region));
       else if(action==='render')emit('result',await renderLarge(id,file,index,scale));
       else emit('result',await (action==='sheets'?sheets(id,file):vectors(id,file,index,progressive?data=>emit('preview',data):undefined)));
       emit('done',null);
