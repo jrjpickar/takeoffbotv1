@@ -14,8 +14,9 @@ export function cadWallRuns(paths:{layer?:string;paint:string;simple:boolean;poi
   const groups=new Map<string,{vertical:boolean;at:number;segments:[number,number][]}>();
   for(const path of paths){
     if(path.layer!=='A-DEMO'||path.paint!=='stroke'||!path.simple)continue;
-    for(let i=1;i<path.points.length;i++){
-      const a=path.points[i-1],b=path.points[i];
+    const points=path.points;
+    for(let i=1;i<points.length;i++){
+      const a=points[i-1],b=points[i];
       const vertical=Math.abs(a[0]-b[0])<.1;
       const axis=vertical?1:0,cross=1-axis;
       const length=Math.abs(a[axis]-b[axis]);

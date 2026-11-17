@@ -1,13 +1,14 @@
 import type { Point } from './domain';
 
-type Stroke={paint:string;color:string;points:Point[];simple:boolean;width:number};
+type Stroke={paint:string;color:string;points:Point[];pointCount:number;simple:boolean;width:number};
 type Bounds=[number,number,number,number];
 
 export function dashedPartitions(paths:Stroke[], legend:Bounds){
   const lines=paths.flatMap(p=>{
-    if(p.paint!=='stroke'||!p.simple||p.points.length<2||!p.color)return [];
-    return p.points.slice(1).flatMap((b,index)=>{
-      const a=p.points[index];
+    if(p.paint!=='stroke'||!p.simple||p.pointCount<2||!p.color)return [];
+    const points=p.points;
+    return points.slice(1).flatMap((b,index)=>{
+      const a=points[index];
       const vertical=Math.abs(a[0]-b[0])<.12;
       const axis=vertical?1:0, cross=1-axis;
       const lo=Math.min(a[axis],b[axis]),hi=Math.max(a[axis],b[axis]);

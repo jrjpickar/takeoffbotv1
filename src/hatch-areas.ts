@@ -1,13 +1,13 @@
 import clipping from 'polygon-clipping';
 import type { Point } from './domain';
 
-export type HatchStroke={seq:number;paint:string;color:string;points:Point[];simple:boolean};
+export type HatchStroke={seq:number;paint:string;color:string;points:Point[];pointCount:number;simple:boolean};
 const root=Math.SQRT2;
 const precision=(n:number)=>Math.round(n*100)/100;
 
 export function hatchAreas(paths:HatchStroke[], label:[number,number,number,number]) {
   const strokes=paths.flatMap(path=>{
-    if(path.paint!=='stroke'||!path.simple||path.points.length!==2||!path.color)return [];
+    if(path.paint!=='stroke'||!path.simple||path.pointCount!==2||!path.color)return [];
     const [a,b]=path.points, dx=b[0]-a[0],dy=b[1]-a[1];
     if(Math.abs(dx)<1||Math.abs(Math.abs(dx)-Math.abs(dy))>.03)return [];
     const slope=Math.sign(dx*dy);

@@ -145,17 +145,24 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
         return;
       }
       const page=await doc!.getPage(index+1);
-      if(!live)return;
-      const view=page.getViewport({scale});
       const buffer=document.createElement('canvas');
-      buffer.width=Math.ceil(view.width);buffer.height=Math.ceil(view.height);
-      const task=page.render({canvas:buffer,viewport:view});
-      cancel=()=>task.cancel();
-      await task.promise;
-      if(!live)return;
-      element.width=buffer.width;element.height=buffer.height;
-      element.getContext('2d')!.drawImage(buffer,0,0);
-      setReady(true);
+      try{
+        if(!live)return;
+        const view=page.getViewport({scale});
+        buffer.width=Math.ceil(view.width);buffer.height=Math.ceil(view.height);
+        const task=page.render({canvas:buffer,viewport:view});
+        cancel=()=>task.cancel();
+        await task.promise;
+        if(!live)return;
+        element.width=buffer.width;element.height=buffer.height;
+        element.getContext('2d')!.drawImage(buffer,0,0);
+        setReady(true);
+      }finally{
+        // Keep only the displayed bitmap after a page is drawn. Release
+        // operator lists, page images and the scratch canvas on cancellation too.
+        page.cleanup();
+        buffer.width=buffer.height=0;
+      }
     };
     const timer=window.setTimeout(()=>{
       render().catch(e=>{
