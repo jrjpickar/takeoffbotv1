@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pymupdf as pdf
 from pydantic import BaseModel, Field
+from .sheet_scale import printed_scale
 from .domain import Calibration, Measurement, StyleRule, SCOPES, quantities
 
 TAG = re.compile(r"A2Z TAKEOFF:\s*(\w+)(?:\s+THICKNESS=(\d+(?:\.\d+)?)IN)?", re.I)
@@ -53,7 +54,18 @@ def read_sheet(page):
                "bounds": bounds(a.rect), "vertices": [point(p) for p in (a.vertices or [])]
                if a.type[1] in {"Line", "PolyLine", "Polygon"} else [],
                "xref": a.xref} for a in page.annots()]
-    return {"paths": paths, "labels": labels, "annotations": annots}
+    scales = []
+    for annotation in annots:
+        match = BAR.fullmatch(annotation["text"])
+        if match and annotation["type"] == "Line" and len(annotation["vertices"]) == 2 and float(match[1]) > 0:
+            bar = Calibration(points=annotation["vertices"], feet=float(match[1]), source=f"Scale bar xref {annotation['xref']}")
+            if bar.factor:
+                scales.append(bar)
+    scale = scales[0] if len(scales) == 1 else None
+    if not scales:
+        scale = printed_scale(labels, page.rect.width, page.rect.height)
+    return {"paths": paths, "labels": labels, "annotations": annots,
+            "scale": scale.model_dump() if scale else None, "multiple_bars": len(scales) > 1}
 
 def vector_geometry(path, unit):
     entries = path["items"]
@@ -83,20 +95,13 @@ def vector_geometry(path, unit):
 def process(page, run):
     data = read_sheet(page)
     warnings = []
-    scales = []
-    for a in data["annotations"]:
-        match = BAR.fullmatch(a["text"])
-        if match and a["type"] == "Line" and len(a["vertices"]) == 2 and float(match[1]) > 0:
-            bar = Calibration(points=a["vertices"], feet=float(match[1]), source=f"Scale bar xref {a['xref']}")
-            if bar.factor:
-                scales.append(bar)
     cal = run.calibration
-    if not cal and len(scales) == 1:
-        cal = scales[0]
+    if not cal and data["scale"]:
+        cal = Calibration.model_validate(data["scale"])
         yield "scale", cal.model_dump()
     if not cal or not cal.factor:
-        warnings.append("Calibrate this sheet with two points and a known distance. Printed scale text alone is insufficient.")
-    if len(scales) > 1:
+        warnings.append("Calibrate this sheet with two points and a known distance.")
+    if data["multiple_bars"]:
         warnings.append("Multiple tagged scale bars. Confirm scale and use a separate project for mixed-scale views.")
     factor = cal.factor if cal else None
     mappings = {}

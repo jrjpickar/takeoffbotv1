@@ -30,6 +30,14 @@ test('local upload, live overlays, resize, approve, price, export and reopen',as
   await expect(page.getByRole('navigation',{name:'Sheets'}).getByRole('button')).toHaveCount(4);
   await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true');
 
+  const pan=page.getByRole('button',{name:'Pan',exact:true});
+  await expect(pan).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Select',exact:true}).click();
+  await page.getByRole('button',{name:'Next sheet'}).click();
+  await expect(pan).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Previous sheet'}).click();
+  await expect(page.getByTestId('paper')).toHaveAttribute('data-ready','true');
+
   await page.getByRole('button',{name:'Run colors…'}).click();
   await page.getByLabel('Run color for Interior walls').fill('#0055ff');
   await page.getByRole('button',{name:'Apply colors and run'}).click();

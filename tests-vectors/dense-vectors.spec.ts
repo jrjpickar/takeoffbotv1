@@ -7,6 +7,8 @@ test('dense hosted vectors preserve late geometry, sheet and document identity, 
   await page.waitForFunction(()=>!!window.vectorTest);
   const r=await page.evaluate(()=>window.vectorTest.synthetic());
   expect(r.count).toBe(2);
+  expect(r.firstPreviewEvent).toBe('preview');
+  expect(r.lateGeometry).toBe(false);
   expect(r.scale).toMatchObject({feet:10,source:expect.stringMatching(/^Scale bar xref/)});
   expect(r.segments).toBe(15000);
   expect(r.curve).toEqual([['c',[[10,80],[20,75],[30,75],[40,80]]]]);
@@ -24,6 +26,24 @@ test('dense hosted vectors preserve late geometry, sheet and document identity, 
   expect(r.revisit).toEqual(r.first);
   expect(r.render).toEqual({width:480,height:320,rgba:[51,127,204,255]});
   console.log(`500,000 background paints: index + bounded preview ${r.previewMs} ms, full takeoff ${r.takeoffMs} ms`);
+});
+
+test('cancels a queued preview and renders the active sheet before its preview',async({page})=>{
+  await page.goto('/tests-vectors/vectors-fixture.html');
+  await page.waitForFunction(()=>!!window.vectorTest);
+  expect(await page.evaluate(()=>window.vectorTest.queuedPreviews())).toEqual(['render','preview']);
+});
+
+test('printed architectural and ratio scales require an unambiguous sheet scale',async({page})=>{
+  await page.goto('/tests-vectors/vectors-fixture.html');
+  await page.waitForFunction(()=>!!window.vectorTest);
+  const r=await page.evaluate(()=>window.vectorTest.printed());
+  expect(r.standalone).toMatchObject({feet:1,points:[[0,0],[18,0]]});
+  expect(r.repeated).toEqual(expect.objectContaining({feet:1,points:[[0,0],[18,0]]}));
+  expect(r.ratio).toMatchObject({feet:100/12,points:[[0,0],[72,0]]});
+  expect(r.conflicting).toBeUndefined();
+  expect(r.uncertain).toBeUndefined();
+  expect(r.bareRatio).toBeUndefined();
 });
 
 test('supplied ZIP imports, extracts and renders all 105 sheets',async({page},info)=>{

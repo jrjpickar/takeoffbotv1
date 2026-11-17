@@ -86,7 +86,7 @@ function App() {
   const [dragging,setDragging]=useState(false);
   const dragDepth=useRef(0);
   const [scope,setScope]=useState<Scope>('wall');
-  const [mode,setMode]=useState<Mode>('select');
+  const [mode,setMode]=useState<Mode>('pan');
   const [zoom,setZoom]=useState(1);
   const [snap,setSnap]=useState(true);
   const [showReview,setShowReview]=useState(true);
@@ -109,6 +109,7 @@ function App() {
   const [color,setColor]=useState('#c53344');
   const [dash,setDash]=useState(false);
   const [extraction,setExtraction]=useState<Extraction>();
+  const [additionalStyles,setAdditionalStyles]=useState<Extraction["paths"]>([]);
   const [price,setPrice]=useState<Price|null>(null);
   const [pricing,setPricing]=useState('');
   const [savedRevision,setSavedRevision]=useState('');
@@ -116,13 +117,13 @@ function App() {
   const dirty=state!==saved;
   const root=project ? `/api/projects/${project.id}` : '';
   const cal=state.scales[sheet];
-  const localItems=state.items.filter(i=>i.sheet===sheet);
-  const visible=localItems.filter(i=>!hidden.includes(i.scope));
+  const localItems=useMemo(()=>state.items.filter(i=>i.sheet===sheet),[state.items,sheet]);
+  const visible=useMemo(()=>localItems.filter(i=>!hidden.includes(i.scope)),[localItems,hidden]);
   const item=localItems.find(i=>i.id===selected);
   const vectors=useMemo(()=>extraction?.paths.flatMap(p=>p.items.flatMap(([kind,pts]) =>
     kind==='c' ? [pts[0],pts.at(-1)!] : pts)).slice(0,30000) ?? [],[extraction]);
-  const styles=useMemo(()=>Array.from(new Map(extraction?.paths.filter(p=>p.color)
-    .map(p=>[`${p.color}/${p.dashed}`,p] as const)).values()),[extraction]);
+  const styles=useMemo(()=>Array.from(new Map([...(extraction?.paths??[]),...additionalStyles].filter(p=>p.color)
+    .map(p=>[`${p.color}/${p.dashed}`,p] as const)).values()),[extraction,additionalStyles]);
 
   const report=(e:unknown)=>setError(e instanceof Error ? e.message : String(e));
   useEffect(()=>{
@@ -135,16 +136,26 @@ function App() {
     return ()=>window.removeEventListener('beforeunload',guard);
   },[dirty]);
   useEffect(()=>{
-    setExtraction(undefined);
+    setExtraction(undefined);setAdditionalStyles([]);
     if (!root) return;
     const ctl=new AbortController();
-    request(`${root}/sheets/${sheet}/vectors`,{signal:ctl.signal}).then(r=>r.json())
-      .then((result:Extraction)=>{
+    let early:Extraction|undefined;
+    const apply=(result:Extraction)=>{
+      if(ctl.signal.aborted)return;
+      setExtraction(result);
+      if(result.scopeHints?.length)setSheetHints(prev=>({...prev,[sheet]:result.scopeHints!}));
+      if(result.scale)setState(prev=>prev.scales[sheet]?prev:changeScale(prev,sheet,result.scale!));
+    };
+    const load=async()=>{
+      if(import.meta.env.MODE==='netlify'){
+        const {previewPlan}=await import('./hosted');
+        const result=await previewPlan<Extraction>(root,sheet,ctl.signal,value=>{early=value;apply(value);});
         if(ctl.signal.aborted)return;
-        setExtraction(result);
-        if(result.scopeHints?.length)setSheetHints(prev=>({...prev,[sheet]:result.scopeHints!}));
-        if(result.scale)setState(prev=>prev.scales[sheet]?prev:changeScale(prev,sheet,result.scale!));
-      }).catch(e=>{if(!ctl.signal.aborted) report(e);});
+        if(early)setAdditionalStyles(result.paths);
+        else apply(result);
+      }else apply(await (await request(`${root}/sheets/${sheet}/vectors`,{signal:ctl.signal})).json());
+    };
+    void load().catch(e=>{if(!ctl.signal.aborted)report(e);});
     return ()=>ctl.abort();
   },[root,sheet]);
   const pricingInput=JSON.stringify({
@@ -196,7 +207,7 @@ function App() {
     changeMode(toolsFor(s).includes(mode as Tool)?mode:toolsFor(s)[0]);
   }
   function changeSheet(index: number) {
-    setSheet(index);setZoom(1);setPending([]);setSelected(undefined);setFeet('');
+    setSheet(index);setZoom(1);setSelected(undefined);changeMode('pan');
   }
   async function open(endpoint: string, init?: RequestInit) {
     if (dirty && !window.confirm('Discard unsaved takeoff changes?')) return;
@@ -205,7 +216,7 @@ function App() {
       let p=await (await request(endpoint,init)).json() as Project;
       if (!p.state) p=await (await request(`/api/projects/${p.id}`)).json();
       setSheetSearch('');setSheetFilter('all');setSheetHints({});setProject(p);setState(p.state);setSaved(p.state);changeSheet(0);
-      setUndo([]);setRedo([]);setZoom(1);setHidden([]);setSavedRevision('');changeMode('select');
+      setUndo([]);setRedo([]);setZoom(1);setHidden([]);setSavedRevision('');
       setProjects(await (await request('/api/projects')).json());
     } catch(e) { report(e); }
     finally { setBusy(''); }
@@ -248,7 +259,7 @@ function App() {
     }
     const scale: Calibration={points:pending as [Point,Point],feet:Number(feet),source:'Manual calibration'};
     if (!Number.isFinite(factor(scale))) {setError('Scale exceeds the supported range.');return;}
-    commit(changeScale(state,sheet,scale));changeMode('select');setNotice('Sheet calibrated.');
+    commit(changeScale(state,sheet,scale));changeMode('pan');setNotice('Sheet calibrated.');
   }
   useEffect(()=>{
     const key=(e:KeyboardEvent)=>{
@@ -286,7 +297,7 @@ function App() {
   }
   async function run(applyColors=false, allSheets=false, demoOnly=false) {
     setColorPrompt(false);
-    setBusy('Processing sheet…');setError('');setNotice('');setPending([]);setMode('select');
+    setBusy('Processing sheet…');setError('');setNotice('');setPending([]);setMode('pan');
     setUndo(prev=>[...prev.slice(-49),state]);setRedo([]);
     if(applyColors)setState(prev=>({...prev,colors:{...prev.colors,...runColors}}));
     const ids=new Set(state.items.map(i=>i.id));
@@ -313,7 +324,7 @@ function App() {
         try {
           await stream(`${root}/sheets/${index}/run`,{calibration:state.scales[index],rules:state.rules?.[index]??[]},(kind,data)=>{
             if(kind==='scopeHints'&&(data as Scope[]).length)setSheetHints(prev=>({...prev,[index]:data as Scope[]}));
-            if (kind==='scale') setState(prev=>changeScale(prev,index,data as Calibration));
+            if (kind==='scale') setState(prev=>prev.scales[index]?prev:changeScale(prev,index,data as Calibration));
             if(kind==='measurement'||kind==='measurements'){
               const candidates=kind==='measurements'?data as Item[]:[data as Item];
               found ||= candidates.length>0;
@@ -550,7 +561,7 @@ function App() {
             <button onClick={()=>finish(mode,pending)}>Finish trace</button><button onClick={()=>setPending(pending.slice(0,-1))}>Remove last point</button>
           </div>}
           <Viewer colors={state.colors} key={project.id} url={root+'/pdf'} index={sheet} sheet={project.sheets[sheet]} items={visible}
-            calibration={cal} mode={busy ? 'select' : mode} activeScope={scope} selected={busy ? undefined : selected} snap={snap}
+            calibration={cal} mode={busy ? 'pan' : mode} activeScope={scope} selected={busy ? undefined : selected} snap={snap}
             zoom={zoom} setZoom={setZoom} fitPage={fitPage} vertices={vectors} pending={pending} setPending={setPending} addPoint={addPoint}
             select={id=>{if(!busy){setSelected(id);if(id)setShowReview(true);}}} changePoints={(id,points)=>{
               const target=state.items.find(i=>i.id===id);

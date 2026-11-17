@@ -269,7 +269,7 @@ function detectedScopes(labels:Awaited<ReturnType<typeof extractSheet>>['labels'
     return scope?[scope]:[];
   }))];
 }
-export async function vectors(id:string,file:Blob,index:number) {
+export async function vectors(id:string,file:Blob,index:number,preview?:(value:{scale?:Calibration;scopeHints:Scope[];paths:SnapPath[]})=>void) {
   const doc=await document(id,file);
   selectSheet(index);
   const page=doc.loadPage(index);
@@ -283,6 +283,12 @@ export async function vectors(id:string,file:Blob,index:number) {
     const paths:SnapPath[]=[];
     const styles=new Set<string>();
     let remaining=15000;
+    let previewSize=0;
+    const sendPreview=()=>{
+      if(!preview||previewSize)return;
+      previewSize=paths.length;
+      preview({scale,scopeHints,paths});
+    };
     walkContents(page,{
       strokePath(path,stroke,m,cs,components,alpha){
         try {
@@ -312,10 +318,11 @@ export async function vectors(id:string,file:Blob,index:number) {
           }
           paths.push({color,dashed,items});
           styles.add(key);
+          if(!remaining)sendPreview();
         }finally{path.destroy();stroke.destroy();cs.destroy();}
       },
     });
-    return {scale,scopeHints,paths};
+    return {scale,scopeHints,paths:paths.slice(previewSize)};
   }finally{page.destroy();}
 }
 
@@ -355,7 +362,7 @@ export async function run(id:string,file:Blob,index:number,input:{calibration?:C
     if(scope&&tool)emit(scope,tool,a.points,`Tagged annotation xref ${a.xref}`,`a${a.xref}`,Number(match?.[2])||null);
     else if(/^A2Z TAKEOFF:/i.test(a.text))warn(`Annotation xref ${a.xref}: unsupported geometry or scope tag.`);
   }
-  const foot = factor(detected.scale??input.calibration);
+  const foot = factor(calibration);
   const keyed = foot&&!raster ? keyedDemolition(paths,labels,1/foot) : undefined;
   const keyedDoors=keyed?.candidates.some(mark=>mark.scope==='door');
   const styles=new Map<string,Map<string,{scope:Scope;thickness:number|null}>>();

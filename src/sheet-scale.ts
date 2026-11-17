@@ -1,21 +1,39 @@
 import type { Calibration } from './domain';
 
 type Label={text:string;bounds:[number,number,number,number]};
-const printed=/^(?:scale\s*:?\s*)?(?:(\d+)\s+)?(\d+)\s*(?:\/\s*(\d+))?\s*"\s*=\s*(\d+)\s*'\s*(?:-?\s*(\d+(?:\.\d+)?)\s*")?$/i;
+const architectural=/^(?:(\d+)\s+)?(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+))?\s*"\s*=\s*(?:(\d+(?:\.\d+)?)\s*'\s*(?:-?\s*(\d+(?:\.\d+)?)\s*")?|(\d+(?:\.\d+)?)\s*")$/;
+const engineering=/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/;
+const caption=/\b(?:floor plan|ceiling plan|site plan|demo(?:lition)? plan|roof plan|foundation plan)\b/i;
+const uncertain=/^(?:n\.?\s*t\.?\s*s\.?|not to scale|as indicated|varies)$/i;
+const normalize=(text:string)=>text.trim().replace(/[“”″]/g,'"').replace(/[‘’′]/g,"'").replace(/[–−]/g,'-');
 
 export function printedScale(labels:Label[],width:number,height:number):Calibration|undefined {
-  const clean=(text:string)=>text.trim().replace(/[“”″]/g,'"').replace(/[‘’′]/g,"'");
-  // A single plan caption is required. Extra scale captions indicate multiple views.
-  if(labels.some(({text})=>/^(?:scale\s*:?\s*)?(?:n\.?\s*t\.?\s*s\.?|not to scale|as indicated|varies)$/i.test(clean(text))))return;
-  const possible=labels.filter(({text})=>/^(?:scale\s*:?\s*)?\d.*(?:=|^\d+\s*:\s*\d+$)/i.test(clean(text)));
-  if(possible.length!==1)return;
-  const label=possible[0], text=clean(label.text), match=printed.exec(text);
-  if(!match||!labels.some(other=>other!==label&&/\b(?:floor plan|demolition floor plan|ceiling plan|site plan|demo(?:lition)? plan|roof plan|foundation plan)\b/i.test(other.text)&&
-    other.text.length<100&&Math.abs(other.bounds[0]-label.bounds[0])<=115&&
-    Math.abs(other.bounds[1]-label.bounds[1])<=40))return;
-  const inches=Number(match[1]??0)+Number(match[2])/Number(match[3]??1);
-  const feet=Number(match[4])+Number(match[5]??0)/12;
-  const points=inches*72;
-  if(!Number.isFinite(points)||points<=0||points>width||feet<=0||height<=0)return;
-  return {points:[[0,0],[points,0]],feet,source:`Printed scale: ${text}`};
+  let result:Calibration|undefined;
+  for(const label of labels){
+    const text=normalize(label.text);
+    const prefix=/^scale(?:\s*:\s*|\s+)/i.exec(text);
+    const value=text.slice(prefix?.[0].length??0);
+    if(uncertain.test(value))return;
+    const imperial=architectural.exec(value);
+    const ratio=engineering.exec(value);
+    if(!imperial&&!ratio){
+      if(prefix&&/^(?:\d|\.\d).*(?:=|:)/.test(value))return;
+      continue;
+    }
+    if(!prefix&&!labels.some(other=>other!==label&&other.text.length<100&&caption.test(other.text)&&
+      Math.abs(other.bounds[0]-label.bounds[0])<=115&&Math.abs(other.bounds[1]-label.bounds[1])<=40)){
+      // An unlabeled ratio could be a note or slope. A numeric architectural
+      // caption outside the plan title could also belong to a detail.
+      if(imperial)return;
+      continue;
+    }
+    const points=imperial?72*(Number(imperial[1]??0)+Number(imperial[2])/Number(imperial[3]??1)):72;
+    const feet=imperial?Number(imperial[4]??0)+Number(imperial[5]??imperial[6]??0)/12:Number(ratio![2])/Number(ratio![1])/12;
+    if(!Number.isFinite(points)||!Number.isFinite(feet)||points<=0||points>width||feet<=0||height<=0)return;
+    if(result){
+      const previous=result.feet/result.points[1][0];
+      if(Math.abs(previous-feet/points)>previous*1e-9)return;
+    }else result={points:[[0,0],[points,0]],feet,source:`Printed scale: ${text}`};
+  }
+  return result;
 }

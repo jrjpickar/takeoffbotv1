@@ -46,6 +46,20 @@ class GeometryTests(unittest.TestCase):
         print(f"\nSynthetic: {measured} quantities, max relative error {maximum_error:.9%}; "
               f"{coverage}/{coverage} supported objects, {coverage}/{coverage+manual} overall authored objects.")
 
+    def test_printed_scale_without_annotations_and_conflicting_views(self):
+        from backend.extract import read_sheet
+
+        with pdf.open() as doc:
+            page = doc.new_page(width=240, height=160)
+            page.insert_text((10, 20), "SCALE: 1/4\" = 1'-0\"")
+            scale = Calibration.model_validate(read_sheet(page)["scale"])
+            self.assertAlmostEqual(scale.factor, 1 / 18)
+            self.assertEqual(dict(process(page, Run()))["scale"], scale.model_dump())
+            manual = Calibration(points=[(0, 0), (72, 0)], feet=10, source="Manual calibration")
+            self.assertNotIn("scale", dict(process(page, Run(calibration=manual))))
+            page.insert_text((10, 40), "SCALE: 1:100")
+            self.assertIsNone(read_sheet(page)["scale"])
+
     def test_manual_units_and_invalid_geometry(self):
         wall = Measurement(sheet=0,scope="wall",tool="polyline",points=[(0,0),(3,4),(3,9)])
         self.assertEqual(quantities(wall,2),{"LF":20})

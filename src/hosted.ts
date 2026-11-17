@@ -8,7 +8,8 @@ type WorkerEvent = {kind:string;data:unknown};
 let worker:Worker|undefined;
 let nextJob=0;
 const pending=new Map<number,(e:WorkerEvent)=>void>();
-function submit(payload:object, onEvent:(e:WorkerEvent)=>void) {
+function submit(payload:object, onEvent:(e:WorkerEvent)=>void,signal?:AbortSignal) {
+  signal?.throwIfAborted();
   if(!worker){
     worker=new Worker(new URL('./hosted.worker.ts',import.meta.url),{type:'module'});
     worker.onmessage=({data})=>pending.get(data.job)?.(data);
@@ -18,17 +19,24 @@ function submit(payload:object, onEvent:(e:WorkerEvent)=>void) {
     };
   }
   const job=++nextJob;
+  const cancel=()=>{
+    pending.delete(job);
+    worker?.postMessage({action:'cancel',job});
+    onEvent({kind:'failed',data:signal?.reason??new DOMException('Aborted','AbortError')});
+  };
+  signal?.addEventListener('abort',cancel,{once:true});
   pending.set(job,e=>{
     onEvent(e);
-    if(e.kind==='done'||e.kind==='failed')pending.delete(job);
+    if(e.kind==='done'||e.kind==='failed'){pending.delete(job);signal?.removeEventListener('abort',cancel);}
   });
   worker.postMessage({job,...payload});
 }
-function extract<T>(payload:object):Promise<T> {
+function extract<T>(payload:object,signal?:AbortSignal,onPreview?:(value:T)=>void):Promise<T> {
   return new Promise((resolve,reject)=>submit(payload,({kind,data})=>{
     if(kind==='result')resolve(data as T);
-    if(kind==='failed')reject(new Error(String(data)));
-  }));
+    if(kind==='preview')onPreview?.(data as T);
+    if(kind==='failed')reject(data instanceof Error?data:new Error(String(data)));
+  },signal));
 }
 
 let db:Promise<IDBDatabase>|undefined;
@@ -204,7 +212,7 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
   const index=Number(sheet);
   if(action!=='sheets'||!Number.isInteger(index)||!sheets[index])throw new Error('Sheet not found.');
   const file=await storedFile(project);
-  if(sub==='vectors')return json(await extract({action:'vectors',id,file,index}));
+  if(sub==='vectors')return json(await extract({action:'vectors',id,file,index},init?.signal??undefined));
   if(sub==='run'){
     const encoder=new TextEncoder();
     let cancelled=false;
@@ -223,6 +231,12 @@ export async function hostedRequest(path:string,init?:RequestInit):Promise<Respo
   throw new Error('Action not supported.');
 }
 
-export function renderLargePlan(path:string,file:Blob,index:number,scale:number) {
-  return extract<Blob>({action:'render',id:path.split('/')[3],file,index,scale});
+export async function previewPlan<T>(root:string,index:number,signal:AbortSignal,onPreview:(value:T)=>void) {
+  const id=root.split('/')[3];
+  const file=await hostedPlanBlob(root+'/pdf');
+  return extract<T>({action:'vectors',id,file,index,progressive:true},signal,onPreview);
+}
+
+export function renderLargePlan(path:string,file:Blob,index:number,scale:number,signal?:AbortSignal) {
+  return extract<Blob>({action:'render',id:path.split('/')[3],file,index,scale},signal);
 }

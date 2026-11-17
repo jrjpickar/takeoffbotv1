@@ -4,7 +4,7 @@ import type {Rule,Sheet} from '../src/domain';
 type Event={job:number;kind:string;data:any};
 const worker=new Worker(new URL('../src/hosted.worker.ts',import.meta.url),{type:'module'});
 let nextJob=0;
-function request(action:string,id:string,file:Blob,index=0,rules:Rule[]=[],scale=1){
+function request(action:string,id:string,file:Blob,index=0,rules:Rule[]=[],scale=1,progressive=false){
   return new Promise<Event[]>((resolve,reject)=>{
     const job=++nextJob,events:Event[]=[];
     const cleanup=()=>{
@@ -20,7 +20,7 @@ function request(action:string,id:string,file:Blob,index=0,rules:Rule[]=[],scale
     }
     worker.addEventListener('error',error);
     worker.addEventListener('message',message);
-    worker.postMessage({job,action,id,file,index,input:{rules},scale});
+    worker.postMessage({job,action,id,file,index,input:{rules},scale,progressive});
   });
 }
 const result=(events:Event[])=>events.find(e=>e.kind==='result')!.data;
@@ -78,11 +78,53 @@ async function pixel(blob:Blob,x:number,y:number){
   }finally{image.close();}
 }
 const api={
+  async queuedPreviews(){
+    const file=fixture([125000,0]);
+    const events:string[]=[];
+    const active=++nextJob, stale=++nextJob, next=++nextJob, render=++nextJob;
+    await new Promise<void>((resolve,reject)=>{
+      function receive({data}:MessageEvent<Event>){
+        if(data.job===active&&data.kind==='preview'){
+          worker.postMessage({job:stale,action:'vectors',id:'queue',file,index:1});
+          worker.postMessage({job:next,action:'vectors',id:'queue',file,index:1});
+          worker.postMessage({job:render,action:'render',id:'queue',file,index:1,scale:1});
+          worker.postMessage({job:stale,action:'cancel'});
+        }
+        if([active,stale,next,render].includes(data.job)&&data.kind==='failed'){
+          worker.removeEventListener('message',receive);reject(new Error(data.data));
+        }
+        if(data.kind==='done'&&data.job===stale)events.push('stale');
+        if(data.kind==='done'&&data.job===render)events.push('render');
+        if(data.kind==='done'&&data.job===next){
+          events.push('preview');
+          worker.removeEventListener('message',receive);resolve();
+        }
+      }
+      worker.addEventListener('message',receive);
+      worker.postMessage({job:active,action:'vectors',id:'queue',file,index:0,progressive:true});
+    });
+    return events;
+  },
+  async printed(){
+    const {printedScale}=await import('../src/sheet-scale');
+    const scale=(...texts:string[])=>printedScale(texts.map(text=>({text,bounds:[10,10,40,20]})),240,160);
+    return {
+      standalone:scale('SCALE: 1/4″ = 1′–0″'),
+      repeated:scale('SCALE: 1/4″ = 1′','Scale 1:48'),
+      ratio:scale('SCALE: 1:100'),
+      conflicting:scale('SCALE: 1:100','SCALE: 1:50'),
+      uncertain:scale('SCALE: 1:100','SCALE: N.T.S.'),
+      bareRatio:scale('1:100'),
+    };
+  },
   async synthetic(){
     const dense=fixture([500000,125000]),other=fixture([0],12);
     const t=performance.now();
     const info=result(await request('sheets','dense',dense)) as Sheet[];
-    const preview=result(await request('vectors','dense',dense));
+    const previewEvents=await request('vectors','dense',dense,0,[],1,true);
+    const early=previewEvents[0];
+    const late=result(previewEvents);
+    const preview={...early.data,paths:[...early.data.paths,...late.paths]};
     const previewMs=Math.round(performance.now()-t);
     const started=performance.now();
     const first=cut(await request('run','dense',dense,0,rules));
@@ -91,7 +133,7 @@ const api={
     const later=cut(await request('run','other',other,0,rules));
     const revisit=cut(await request('run','dense',dense,0,rules));
     const image=result(await request('render','dense',dense,0,[],2));
-    return {count:info.length,scale:preview.scale,segments:preview.paths.reduce((n:number,p:any)=>n+p.items.length,0),
+    return {count:info.length,firstPreviewEvent:early.kind,lateGeometry:late.paths.some((path:any)=>path.items.length),scale:preview.scale,segments:preview.paths.reduce((n:number,p:any)=>n+p.items.length,0),
       curve:preview.paths.find((p:any)=>p.color==='#0000ff').items,
       disconnected:preview.paths.find((p:any)=>p.color==='#00ff00').items,
       lateStyle:preview.paths.find((p:any)=>p.color==='#ff0000'&&p.dashed),

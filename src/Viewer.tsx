@@ -128,13 +128,14 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
   useEffect(() => {
     if (!(useFallback?localFile:doc) || !canvas.current) return;
     let live = true;
+    const controller=new AbortController();
     let cancel = () => {};
     const element = canvas.current;
     setError('');
     const render=async()=>{
       const scale=sheetPixels/Math.max(sheet.width,sheet.height);
       if(useFallback&&localFile){
-        const blob=await (await import('./hosted')).renderLargePlan(url,localFile,index,scale);
+        const blob=await (await import('./hosted')).renderLargePlan(url,localFile,index,scale,controller.signal);
         if(!live)return;
         const image=await createImageBitmap(blob);
         try{
@@ -171,7 +172,7 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
         else setError(e.message);
       });
     },55);
-    return () => { live=false;clearTimeout(timer);cancel(); };
+    return () => { live=false;clearTimeout(timer);controller.abort();cancel(); };
   }, [doc, localFile, useFallback, url, index, sheetPixels, sheet.width, sheet.height]);
 
   const bounded = (p: Point): Point => [clamp(p[0],sheet.width),clamp(p[1],sheet.height)];
@@ -184,20 +185,29 @@ export function Viewer({ colors, url, index, sheet, items, calibration, mode, ac
     }
     return grid;
   },[vertices]);
+  const measurementGrid=useMemo(()=>{
+    const grid=new Map<string,{point:Point;id:string}[]>();
+    for(const {id,points} of items)for(const point of points){
+      const key=point.map(n=>Math.floor(n/32)).join('/');
+      const cell=grid.get(key)??[];
+      cell.push({point,id});grid.set(key,cell);
+    }
+    return grid;
+  },[items]);
   function snapped(p: Point, ignore?: string) {
     if (!snap) return bounded(p);
     let best = 9/z;
     let result = p;
-    const targets = items.filter(i => i.id !== ignore).flatMap(i => i.points);
-    for(let x=Math.floor((p[0]-best)/32);x<=Math.floor((p[0]+best)/32);x++){
-      for(let y=Math.floor((p[1]-best)/32);y<=Math.floor((p[1]+best)/32);y++){
-        for(const point of vertexGrid.get(x+'/'+y)??[])targets.push(point);
-      }
-    }
-    for (const target of targets) {
-      const d = distance(target,p);
-      if (d < best) { best=d; result=target; }
-    }
+    const consider=(target:Point)=>{
+      const d=distance(target,p);
+      if(d<best){best=d;result=target;}
+    };
+    const left=Math.floor((p[0]-best)/32), right=Math.floor((p[0]+best)/32);
+    const top=Math.floor((p[1]-best)/32), bottom=Math.floor((p[1]+best)/32);
+    for(let x=left;x<=right;x++)for(let y=top;y<=bottom;y++)
+      for(const target of measurementGrid.get(x+'/'+y)??[])if(target.id!==ignore)consider(target.point);
+    for(let x=left;x<=right;x++)for(let y=top;y<=bottom;y++)
+      for(const target of vertexGrid.get(x+'/'+y)??[])consider(target);
     return bounded(result);
   }
   const pointer = (stage: Konva.Stage): Point | undefined => {
